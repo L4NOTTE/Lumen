@@ -152,21 +152,21 @@ impl App {
         let blocker = self.blocker.clone();
         let adblock = self.adblock.clone();
 
-        let mut b = WebViewBuilder::new_with_web_context(&mut self.ctx)
+        let mut b = WebViewBuilder::with_web_context(&mut self.ctx)
             .with_devtools(cfg!(debug_assertions))
             .with_additional_browser_args(BROWSER_ARGS)
             .with_bounds(rect)
-            .with_document_title_changed_handler(move |t| {
+            .with_document_title_changed_handler(move |t: String| {
                 let _ = p_title.send_event(UserEvent::Title(id, t));
             })
-            .with_on_page_load_handler(move |_, u| {
+            .with_on_page_load_handler(move |_, u: String| {
                 let _ = p_url.send_event(UserEvent::Url(id, u));
             })
-            .with_new_window_req_handler(move |u| {
+            .with_new_window_req_handler(move |u: String| {
                 let _ = p_win.send_event(UserEvent::NewTab(u));
                 false
             })
-            .with_navigation_handler(move |u| {
+            .with_navigation_handler(move |u: String| {
                 let Ok(mut parsed) = url::Url::parse(&u) else { return true };
 
                 // поисковая строка стартовой страницы
@@ -372,7 +372,7 @@ fn main() {
     let mut ctx = WebContext::new(Some(dir.join("profile")));
 
     let p_ui = proxy.clone();
-    let ui = WebViewBuilder::new_with_web_context(&mut ctx)
+    let ui = WebViewBuilder::with_web_context(&mut ctx)
         .with_html(UI_HTML)
         .with_bounds(ui_rect(&window))
         .with_ipc_handler(move |req: wry::http::Request<String>| {
