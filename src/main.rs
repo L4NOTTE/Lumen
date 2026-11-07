@@ -20,8 +20,8 @@ use tao::{
     window::{Window, WindowBuilder},
 };
 use wry::{
-    dpi::{LogicalPosition, LogicalSize},
-    Rect, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows,
+    dpi::{PhysicalPosition, PhysicalSize},
+    PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows,
 };
 
 const TOOLBAR_H: f64 = 80.0;
@@ -102,24 +102,37 @@ struct App {
     proxy: EventLoopProxy<UserEvent>,
 }
 
-fn logical_size(w: &Window) -> (f64, f64) {
-    let s = w.inner_size().to_logical::<f64>(w.scale_factor());
-    (s.width, s.height)
+fn toolbar_px(w: &Window) -> u32 {
+    (TOOLBAR_H * w.scale_factor()).round() as u32
 }
 
 fn content_rect(w: &Window) -> Rect {
-    let (cw, ch) = logical_size(w);
+    let sz = w.inner_size();
+    let top = toolbar_px(w);
     Rect {
-        position: LogicalPosition::new(0.0, TOOLBAR_H).into(),
-        size: LogicalSize::new(cw, (ch - TOOLBAR_H).max(0.0)).into(),
+        position: PhysicalPosition::new(0i32, top as i32).into(),
+        size: PhysicalSize::new(sz.width, sz.height.saturating_sub(top)).into(),
     }
 }
 
 fn ui_rect(w: &Window) -> Rect {
-    let (cw, _) = logical_size(w);
+    let sz = w.inner_size();
     Rect {
-        position: LogicalPosition::new(0.0, 0.0).into(),
-        size: LogicalSize::new(cw, TOOLBAR_H).into(),
+        position: PhysicalPosition::new(0i32, 0i32).into(),
+        size: PhysicalSize::new(sz.width, toolbar_px(w).min(sz.height)).into(),
+    }
+}
+
+/// Лог в %LOCALAPPDATA%\Lumen\log.txt — для диагностики.
+fn log(msg: &str) {
+    use std::io::Write;
+    let path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("Lumen").join("log.txt");
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let _ = writeln!(f, "{t} {msg}");
     }
 }
 
@@ -153,7 +166,7 @@ impl App {
         let adblock = self.adblock.clone();
 
         let mut b = WebViewBuilder::with_web_context(&mut self.ctx)
-            .with_devtools(cfg!(debug_assertions))
+            .with_devtools(true) // TODO: вернуть cfg!(debug_assertions) после отладки
             .with_additional_browser_args(BROWSER_ARGS)
             .with_bounds(rect)
             .with_document_title_changed_handler(move |t: String| {
@@ -218,9 +231,6 @@ impl App {
         for t in &self.tabs {
             let _ = t.webview.set_bounds(content_rect(&self.window));
             let _ = t.webview.set_visible(t.id == self.active);
-        }
-        if let Some(t) = self.tabs.iter().find(|t| t.id == self.active) {
-            let _ = t.webview.focus();
         }
     }
 
@@ -312,10 +322,19 @@ impl App {
     }
 
     fn handle(&mut self, ev: UserEvent) {
+        match &ev {
+            UserEvent::Ui(s) => log(&format!("ui: {s}")),
+            UserEvent::Title(id, t) => log(&format!("title {id}: {t}")),
+            UserEvent::Url(id, u) => log(&format!("url {id}: {}", u.chars().take(80).collect::<String>())),
+            UserEvent::Navigate(id, u) => log(&format!("navigate {id}: {u}")),
+            UserEvent::Search(id, q) => log(&format!("search {id}: {q}")),
+            UserEvent::NewTab(u) => log(&format!("newtab: {u}")),
+        }
         match ev {
             UserEvent::Ui(s) => {
-                if let Ok(c) = serde_json::from_str::<Cmd>(&s) {
-                    self.cmd(c);
+                match serde_json::from_str::<Cmd>(&s) {
+                    Ok(c) => self.cmd(c),
+                    Err(e) => log(&format!("bad ui message: {e}")),
                 }
             }
             UserEvent::Title(id, t) => {
@@ -348,6 +367,8 @@ impl App {
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| log(&format!("PANIC: {info}"))));
+    log("start");
     // профиль и настройки: %LOCALAPPDATA%\Lumen
     let dir = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("Lumen");
     let filters_dir = dir.join("filters");
@@ -369,18 +390,28 @@ fn main() {
         .build(&event_loop)
         .expect("не удалось создать окно");
 
+    log("window created");
     let mut ctx = WebContext::new(Some(dir.join("profile")));
 
     let p_ui = proxy.clone();
+    let p_ready = proxy.clone();
     let ui = WebViewBuilder::with_web_context(&mut ctx)
+        .with_devtools(true) // TODO: вернуть cfg!(debug_assertions) после отладки
+        .with_additional_browser_args(BROWSER_ARGS) // у всех WebView одного профиля аргументы должны совпадать
         .with_html(UI_HTML)
         .with_bounds(ui_rect(&window))
+        .with_on_page_load_handler(move |ev, _| {
+            if matches!(ev, PageLoadEvent::Finished) {
+                let _ = p_ready.send_event(UserEvent::Ui(r#"{"cmd":"ready"}"#.to_string()));
+            }
+        })
         .with_ipc_handler(move |req: wry::http::Request<String>| {
             let _ = p_ui.send_event(UserEvent::Ui(req.body().clone()));
         })
         .build_as_child(&window)
         .expect("не удалось создать панель интерфейса");
 
+    log("ui webview created");
     let mut app = App {
         window,
         ui,
@@ -395,9 +426,15 @@ fn main() {
         proxy,
     };
     app.new_tab(None);
+    log("first tab created, entering event loop");
 
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
+        if let Event::WindowEvent { event: ref we, .. } = event {
+            if !matches!(we, WindowEvent::CursorMoved { .. } | WindowEvent::CursorEntered { .. } | WindowEvent::CursorLeft { .. }) {
+                log(&format!("window event: {:?}", we));
+            }
+        }
         match event {
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                 *flow = ControlFlow::Exit
