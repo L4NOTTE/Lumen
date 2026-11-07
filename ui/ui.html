@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+  :root { --bg:#f3f4f6; --bar:#fff; --fg:#1f2328; --mute:#6b7280; --line:#e5e7eb; --acc:#4f46e5; --hover:#e8eaee; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1b1c20; --bar:#25262b; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:#8b8dff; --hover:#2f3137; }
+  }
+  * { box-sizing:border-box; margin:0; user-select:none; }
+  html,body { height:100%; overflow:hidden; background:var(--bg); color:var(--fg);
+    font:13px/1 "Segoe UI Variable","Segoe UI",system-ui,sans-serif; }
+  #tabs { height:36px; display:flex; align-items:flex-end; gap:2px; padding:4px 6px 0; }
+  .tab { display:flex; align-items:center; gap:6px; width:200px; min-width:70px; height:32px; padding:0 8px 0 12px;
+    border-radius:8px 8px 0 0; color:var(--mute); cursor:default; }
+  .tab:hover { background:var(--hover); }
+  .tab.on { background:var(--bar); color:var(--fg); }
+  .tab span { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .x, .btn { display:grid; place-items:center; border:0; background:none; color:inherit; border-radius:6px; cursor:pointer; }
+  .x { width:18px; height:18px; font-size:14px; }
+  .x:hover, .btn:hover { background:var(--hover); }
+  #nav { height:44px; display:flex; align-items:center; gap:4px; padding:0 8px; background:var(--bar); border-bottom:1px solid var(--line); }
+  .btn { width:30px; height:30px; font-size:16px; }
+  .btn.on { color:var(--acc); }
+  #url { flex:1; height:30px; border:1px solid var(--line); border-radius:15px; padding:0 14px;
+    background:var(--bg); color:var(--fg); outline:none; user-select:text; font:inherit; }
+  #url:focus { border-color:var(--acc); background:var(--bar); }
+  select { height:30px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); padding:0 6px; font:inherit; }
+</style>
+</head>
+<body>
+  <div id="tabs"></div>
+  <div id="nav">
+    <button class="btn" id="back" title="Назад">←</button>
+    <button class="btn" id="fwd" title="Вперёд">→</button>
+    <button class="btn" id="rel" title="Обновить (F5)">⟳</button>
+    <input id="url" placeholder="Поиск или адрес сайта" spellcheck="false" autocomplete="off">
+    <select id="engine" title="Поисковая система">
+      <option value="google">Google</option>
+      <option value="yandex">Яндекс</option>
+      <option value="duckduckgo">DuckDuckGo</option>
+    </select>
+    <button class="btn" id="shield" title="Блокировка рекламы">🛡</button>
+  </div>
+<script>
+const send = (o) => window.ipc.postMessage(JSON.stringify(o));
+const $ = (id) => document.getElementById(id);
+let state = { tabs: [], active: 0 };
+
+window.onState = (s) => {
+  state = s;
+  const box = $('tabs'); box.innerHTML = '';
+  for (const t of s.tabs) {
+    const d = document.createElement('div');
+    d.className = 'tab' + (t.id === s.active ? ' on' : '');
+    const sp = document.createElement('span'); sp.textContent = t.title || 'Новая вкладка';
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
+    x.onclick = (e) => { e.stopPropagation(); send({ cmd: 'close_tab', id: t.id }); };
+    d.onclick = () => send({ cmd: 'switch', id: t.id });
+    d.onauxclick = (e) => { if (e.button === 1) send({ cmd: 'close_tab', id: t.id }); };
+    d.append(sp, x); box.append(d);
+  }
+  const plus = document.createElement('button'); plus.className = 'btn'; plus.textContent = '+'; plus.title = 'Новая вкладка (Ctrl+T)';
+  plus.style.marginBottom = '2px'; plus.onclick = () => send({ cmd: 'new_tab' }); box.append(plus);
+
+  const cur = s.tabs.find((t) => t.id === s.active);
+  if (document.activeElement !== $('url')) $('url').value = cur ? cur.url : '';
+  $('engine').value = s.engine;
+  $('shield').classList.toggle('on', s.adblock);
+  $('shield').title = s.adblock ? 'Блокировка рекламы: включена' : 'Блокировка рекламы: выключена';
+};
+
+$('back').onclick = () => send({ cmd: 'back' });
+$('fwd').onclick = () => send({ cmd: 'forward' });
+$('rel').onclick = () => send({ cmd: 'reload' });
+$('shield').onclick = () => send({ cmd: 'toggle_adblock' });
+$('engine').onchange = (e) => send({ cmd: 'set_engine', engine: e.target.value });
+$('url').addEventListener('focus', (e) => e.target.select());
+$('url').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.value.trim()) { send({ cmd: 'go', text: e.target.value }); e.target.blur(); }
+});
+addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key === 't') { e.preventDefault(); send({ cmd: 'new_tab' }); }
+  if (e.ctrlKey && e.key === 'w') { e.preventDefault(); send({ cmd: 'close_tab', id: state.active }); }
+  if (e.ctrlKey && e.key === 'l') { e.preventDefault(); $('url').focus(); }
+  if (e.key === 'F5') { e.preventDefault(); send({ cmd: 'reload' }); }
+});
+send({ cmd: 'ready' });
+</script>
+</body>
+</html>
