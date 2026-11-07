@@ -1,25 +1,44 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-incognito="__INC__" data-theme="__THEME__" data-bg="__BGATTR__">
 <head>
 <meta charset="utf-8">
 <title>Новая вкладка</title>
 <style>
-  :root { --bg:#f8f9fb; --fg:#1f2328; --mute:#6b7280; --line:#d9dce2; --acc:#4f46e5; --card:#fff; }
+  :root { --acc-l:#4f46e5; --acc-d:#8b8dff; --font:'Segoe UI Variable','Segoe UI',system-ui,sans-serif; --fs:13px;
+          --bg:#f8f9fb; --fg:#1f2328; --mute:#6b7280; --line:#d9dce2; --acc:var(--acc-l); --card:#fff; --ease:cubic-bezier(.2,.8,.2,1); }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#16171a; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:#8b8dff; --card:#202226; }
+    :root { --bg:#16171a; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:var(--acc-d); --card:#202226; }
   }
+  [data-theme="light"] { --bg:#f8f9fb; --fg:#1f2328; --mute:#6b7280; --line:#d9dce2; --acc:var(--acc-l); --card:#fff; }
+  [data-theme="dark"]  { --bg:#16171a; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:var(--acc-d); --card:#202226; }
+  [data-incognito="1"] { --bg:#120b1f; --fg:#ece6f7; --mute:#a99bc4; --line:#3a2d52; --acc:#b794f6; --card:#1c1330; }
+  /* фон-картинка или градиент: светлый текст и «стеклянное» поле поиска */
+  [data-bg="1"] { --fg:#fff; --mute:rgba(255,255,255,.82); --line:rgba(255,255,255,.35); --card:rgba(255,255,255,.16); --acc:#fff; }
+
   * { box-sizing:border-box; }
-  html,body { height:100%; margin:0; background:var(--bg); color:var(--fg);
-    font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif; }
-  main { height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px; padding-bottom:8vh; }
-  h1 { margin:0; font-size:44px; font-weight:300; letter-spacing:.14em; }
+  html,body { height:100%; margin:0; background:var(--bg); color:var(--fg); font-family:var(--font); font-size:calc(var(--fs) + 3px); }
+  [data-bg="1"] body::before { content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background:linear-gradient(rgba(0,0,0,.22),rgba(0,0,0,.42)); }
+  main { position:relative; z-index:1; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:28px; padding-bottom:8vh; }
+  main > * { animation:rise .55s var(--ease) both; }
+  main > *:nth-child(2) { animation-delay:.08s; }
+  main > *:nth-child(3) { animation-delay:.16s; }
+  h1 { margin:0; font-size:3.2em; font-weight:300; letter-spacing:.14em; text-shadow:0 2px 18px rgba(0,0,0,.18); }
   h1 b { color:var(--acc); font-weight:600; }
   form { width:min(560px,86vw); }
-  input { width:100%; height:48px; padding:0 22px; font:inherit; font-size:16px; color:var(--fg);
-    background:var(--card); border:1px solid var(--line); border-radius:24px; outline:none; transition:border-color .15s, box-shadow .15s; }
-  input:focus { border-color:var(--acc); box-shadow:0 0 0 3px color-mix(in srgb, var(--acc) 22%, transparent); }
-  p { margin:0; color:var(--mute); font-size:13px; }
+  input { width:100%; height:3em; padding:0 1.4em; font:inherit; color:var(--fg);
+    background:var(--card); border:1px solid var(--line); border-radius:2em; outline:none;
+    transition:border-color .2s, box-shadow .25s, transform .25s var(--ease); }
+  [data-bg="1"] input { backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
+  [data-bg="1"] input::placeholder { color:rgba(255,255,255,.75); }
+  input:focus { border-color:var(--acc); transform:translateY(-1px);
+    box-shadow:0 6px 24px color-mix(in srgb, var(--acc) 28%, transparent); }
+  p { margin:0; color:var(--mute); font-size:.82em; text-align:center; line-height:1.5; }
+  @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
 </style>
+<style id="vars">/*__VARS__*/</style>
+<style id="bgcss">/*__BGCSS__*/</style>
 </head>
 <body>
 <main>
@@ -27,7 +46,12 @@
   <form action="https://lumen.invalid/s" method="get">
     <input name="q" placeholder="Поиск или адрес сайта" autofocus autocomplete="off" spellcheck="false">
   </form>
-  <p>Быстро. Тихо. Без рекламы.</p>
+  <p id="t"></p>
 </main>
+<script>
+  document.getElementById('t').innerHTML = document.documentElement.dataset.incognito === '1'
+    ? '🕶 Режим инкогнито<br>История, куки и кэш не сохраняются и удаляются после закрытия окна'
+    : 'Быстро. Тихо. Без рекламы.';
+</script>
 </body>
 </html>
