@@ -57,8 +57,14 @@
   new MutationObserver((ms) => ms.forEach((r) => r.addedNodes.forEach(kill)))
     .observe(document, { childList: true, subtree: true });
 
-  // косметика
-  const st = document.createElement('style');
-  st.textContent = CSS;
-  (document.head || document.documentElement).appendChild(st);
+  // косметика (конструируемая таблица стилей работает и на сайтах со строгим CSP)
+  try {
+    const sh = new CSSStyleSheet();
+    sh.replaceSync(CSS);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sh];
+  } catch (_) {
+    const st = document.createElement('style');
+    st.textContent = CSS;
+    (document.head || document.documentElement).appendChild(st);
+  }
 })();

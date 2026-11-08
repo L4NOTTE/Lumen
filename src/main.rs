@@ -1,8 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod blocker;
+mod ext;
+mod filters;
+mod hook;
+mod music;
+mod sys;
 
 use std::{
+    cell::RefCell,
     fs,
     path::PathBuf,
     rc::Rc,
@@ -14,6 +20,9 @@ use std::{
 };
 
 use blocker::Blocker;
+use filters::{selectors_to_css, Filters};
+use hook::SharedFilters;
+use music::MusicState;
 use serde::{Deserialize, Serialize};
 use tao::{
     event::{Event, WindowEvent},
@@ -22,7 +31,8 @@ use tao::{
 };
 use wry::{
     dpi::{PhysicalPosition, PhysicalSize},
-    PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewBuilderExtWindows,
+    MemoryUsageLevel, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder,
+    WebViewBuilderExtWindows, WebViewExtWindows,
 };
 
 const TOOLBAR_H: f64 = 80.0;
@@ -38,6 +48,31 @@ const BROWSER_ARGS: &str = "--enable-features=ParallelDownloading \
 /// Через сколько фоновая вкладка «засыпает» (выгружается из памяти).
 const SLEEP_AFTER: Duration = Duration::from_secs(5 * 60);
 const TICK_EVERY: Duration = Duration::from_secs(60);
+/// Через сколько скрытая вкладка приостанавливается (освобождает процессор и память).
+const SUSPEND_AFTER: Duration = Duration::from_secs(60);
+
+/// Применяет CSS через конструируемую таблицу стилей — работает даже на сайтах со строгим CSP.
+fn inject_css_js(key: &str, css: &str) -> String {
+    format!(
+        "(()=>{{const css={};const k={};try{{window.__lc=window.__lc||{{}};let s=window.__lc[k];\
+         if(!s){{s=new CSSStyleSheet();window.__lc[k]=s;document.adoptedStyleSheets=[...document.adoptedStyleSheets,s];}}\
+         s.replaceSync(css);}}catch(e){{}}}})()",
+        serde_json::to_string(css).unwrap_or_else(|_| "\"\"".into()),
+        serde_json::to_string(key).unwrap_or_else(|_| "\"k\"".into()),
+    )
+}
+
+/// Собирает классы и id элементов страницы — для общих косметических правил.
+const HARVEST_JS: &str = "(()=>{const c=new Set(),i=new Set();\
+    document.querySelectorAll('[class]').forEach(e=>e.classList.forEach(x=>c.add(x)));\
+    document.querySelectorAll('[id]').forEach(e=>i.add(e.id));\
+    return JSON.stringify({c:[...c],i:[...i]});})()";
+
+#[derive(Deserialize)]
+struct Harvest {
+    c: Vec<String>,
+    i: Vec<String>,
+}
 
 /// Сколько записей истории хранить.
 const HISTORY_MAX: usize = 5000;
@@ -149,6 +184,9 @@ struct Settings {
     font: String,
     font_size: String,
     bg_mode: String,
+    adblock_level: String,
+    audd_token: String,
+    music_source: String,
 }
 
 impl Default for Settings {
@@ -161,6 +199,9 @@ impl Default for Settings {
             font: "system".into(),
             font_size: "normal".into(),
             bg_mode: "none".into(),
+            adblock_level: "strong".into(),
+            audd_token: String::new(),
+            music_source: "system".into(),
         }
     }
 }
@@ -183,6 +224,14 @@ enum UserEvent {
     Search(u32, String),
     NewTab(String),
     Tick,
+    FiltersBuilt(Arc<Filters>),
+    FiltersStatus(String),
+    Cosmetic(u32),
+    Harvest(u32, String),
+    Extensions(String),
+    ExtInstalled(Result<PathBuf, String>),
+    ExtChanged(String),
+    Music(MusicState),
 }
 
 #[derive(Deserialize)]
@@ -208,6 +257,15 @@ enum Cmd {
     SetBgMode { mode: String },
     SetBackground { data: String },
     ClearBackground,
+    SetAdblockLevel { level: String },
+    UpdateFilters,
+    Recognize,
+    SetMusic { token: String, source: String },
+    ExtOpenDir,
+    ExtInstall { input: String },
+    ExtToggle { id: String, on: bool },
+    ExtRemove { id: String },
+    ExtRefresh,
 }
 
 // ---------- приложение ----------
@@ -220,6 +278,9 @@ struct Tab {
     url: String,
     loading: bool,
     last_active: Instant,
+    suspended: bool,
+    /// true — для вкладки включён режим низкого потребления памяти
+    low: bool,
 }
 
 struct App {
@@ -242,6 +303,13 @@ struct App {
     blocker: Rc<Blocker>,
     adblock: Arc<AtomicBool>,
     proxy: EventLoopProxy<UserEvent>,
+    filters: SharedFilters,
+    filters_status: String,
+    lists_dir: PathBuf,
+    user_filters_dir: PathBuf,
+    ext_dir: PathBuf,
+    music: MusicState,
+    music_busy: Arc<AtomicBool>,
 }
 
 fn toolbar_px(w: &Window) -> u32 {
@@ -427,10 +495,13 @@ impl App {
         );
         let blocker = self.blocker.clone();
         let adblock = self.adblock.clone();
+        let page = Rc::new(RefCell::new(String::new()));
+        let page_nav = page.clone();
 
         let mut b = WebViewBuilder::with_web_context(&mut self.ctx)
             .with_devtools(cfg!(debug_assertions))
             .with_incognito(incognito)
+            .with_browser_extensions_enabled(!incognito)
             .with_additional_browser_args(BROWSER_ARGS)
             .with_bounds(rect)
             .with_document_title_changed_handler(move |t: String| {
@@ -456,6 +527,11 @@ impl App {
                     return false;
                 }
 
+                // адрес страницы нужен блокировщику для проверки «сторонних» запросов
+                if matches!(parsed.scheme(), "http" | "https") {
+                    *page_nav.borrow_mut() = u.clone();
+                }
+
                 // HTTPS-only: http -> https (кроме локальных адресов)
                 if parsed.scheme() == "http" {
                     let local = matches!(
@@ -472,14 +548,19 @@ impl App {
                 !(adblock.load(Ordering::Relaxed) && blocker.is_blocked(&u))
             });
 
-        if self.settings.adblock {
+        // базовый скрипт-блокировщик нужен в «базовом» режиме и пока не загрузились большие фильтры
+        let need_basic = self.settings.adblock
+            && (self.settings.adblock_level == "basic" || self.filters.borrow().is_none());
+        if need_basic {
             b = b.with_initialization_script(self.blocker.script());
         }
         b = match url {
             Some(u) => b.with_url(u),
             None => b.with_html(newtab),
         };
-        b.build_as_child(&self.window).expect("не удалось создать WebView2")
+        let wv = b.build_as_child(&self.window).expect("не удалось создать WebView2");
+        let _ = hook::install_blocker(&wv, self.filters.clone(), self.adblock.clone(), page);
+        wv
     }
 
     fn new_tab(&mut self, url: Option<String>) {
@@ -493,6 +574,8 @@ impl App {
             url: String::new(),
             loading: false,
             last_active: Instant::now(),
+            suspended: false,
+            low: false,
         });
         self.activate(id);
     }
@@ -531,17 +614,27 @@ impl App {
         self.push_state();
     }
 
-    fn layout(&self) {
+    fn layout(&mut self) {
         let open = !self.panel.is_empty();
         // при открытой панели интерфейс занимает всё окно, а страница скрыта
         let _ = self.ui.set_bounds(if open { full_rect(&self.window) } else { ui_rect(&self.window) });
-        for t in &self.tabs {
+        for t in self.tabs.iter_mut() {
             if let Some(wv) = &t.webview {
                 let visible = t.id == self.active && !open;
                 if visible {
+                    if t.suspended {
+                        hook::resume(wv);
+                        t.suspended = false;
+                    }
                     let _ = wv.set_bounds(content_rect(&self.window));
                 }
                 let _ = wv.set_visible(visible);
+                // скрытые вкладки переводим в режим низкого потребления памяти
+                if visible == t.low {
+                    let level = if visible { MemoryUsageLevel::Normal } else { MemoryUsageLevel::Low };
+                    let _ = wv.set_memory_usage_level(level);
+                    t.low = !visible;
+                }
             }
         }
     }
@@ -578,6 +671,8 @@ impl App {
                 "has_bg": self.bg_data.is_some(),
             },
             "look": { "al": al, "ad": ad, "font": font_stack(&s.font), "fs": font_px(&s.font_size) },
+            "filters": { "level": s.adblock_level, "status": self.filters_status },
+            "music_cfg": { "token": s.audd_token, "source": s.music_source },
         });
         let _ = self.ui.evaluate_script(&format!("window.onState({state})"));
     }
@@ -591,6 +686,133 @@ impl App {
         {
             f(wv);
         }
+    }
+
+    fn spawn_filters(&self, force: bool) {
+        if self.settings.adblock_level != "strong" {
+            return;
+        }
+        let (lists, user, p) = (self.lists_dir.clone(), self.user_filters_dir.clone(), self.proxy.clone());
+        std::thread::spawn(move || {
+            let status = |m: &str| {
+                let _ = p.send_event(UserEvent::FiltersStatus(m.to_string()));
+            };
+            let mut built = false;
+            if !force {
+                if let Some(f) = Filters::build(&lists, &user) {
+                    status(&format!("Правил загружено: {}", f.rules));
+                    let _ = p.send_event(UserEvent::FiltersBuilt(Arc::new(f)));
+                    built = true;
+                } else {
+                    status("Загрузка фильтров…");
+                }
+            } else {
+                status("Обновление фильтров…");
+            }
+            let n = filters::update_lists(&lists, force);
+            if n > 0 || force {
+                match Filters::build(&lists, &user) {
+                    Some(f) => {
+                        status(&format!("Правил загружено: {}", f.rules));
+                        let _ = p.send_event(UserEvent::FiltersBuilt(Arc::new(f)));
+                    }
+                    None => status("Не удалось загрузить фильтры (проверьте интернет)"),
+                }
+            } else if !built {
+                status("Не удалось загрузить фильтры (проверьте интернет)");
+            }
+        });
+    }
+
+    fn apply_cosmetic(&self, id: u32) {
+        if !self.adblock.load(Ordering::Relaxed) || self.settings.adblock_level != "strong" {
+            return;
+        }
+        let Some(f) = self.filters.borrow().clone() else { return };
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
+        let Some(wv) = tab.webview.as_ref() else { return };
+        if !tab.url.starts_with("http") {
+            return;
+        }
+        let cos = f.cosmetic(&tab.url);
+        let css = selectors_to_css(cos.hide.iter());
+        if !css.is_empty() {
+            let _ = wv.evaluate_script(&inject_css_js("d", &css));
+        }
+        if !cos.generichide {
+            let p = self.proxy.clone();
+            let _ = wv.evaluate_script_with_callback(HARVEST_JS, move |res| {
+                let _ = p.send_event(UserEvent::Harvest(id, res));
+            });
+        }
+    }
+
+    fn apply_generic(&self, id: u32, res: &str) {
+        let Some(f) = self.filters.borrow().clone() else { return };
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
+        let Some(wv) = tab.webview.as_ref() else { return };
+        let raw = serde_json::from_str::<String>(res).unwrap_or_else(|_| res.to_string());
+        let Ok(h) = serde_json::from_str::<Harvest>(&raw) else { return };
+        let cos = f.cosmetic(&tab.url);
+        let sels = f.generic(&h.c, &h.i, &cos.exceptions);
+        let css = selectors_to_css(sels.iter());
+        if !css.is_empty() {
+            let _ = wv.evaluate_script(&inject_css_js("g", &css));
+        }
+    }
+
+    fn refresh_ext(&self) {
+        let p = self.proxy.clone();
+        ext::list(&self.ui, move |json| {
+            let _ = p.send_event(UserEvent::Extensions(json));
+        });
+    }
+
+    fn push_music(&self) {
+        if let Ok(j) = serde_json::to_string(&self.music) {
+            let _ = self.ui.evaluate_script(&format!("window.onMusic({j})"));
+        }
+    }
+
+    fn start_recognize(&mut self) {
+        self.panel = "music".into();
+        self.layout();
+        if self.music_busy.load(Ordering::SeqCst) {
+            self.push_state();
+            self.push_music();
+            return;
+        }
+        let token = self.settings.audd_token.trim().to_string();
+        if token.is_empty() {
+            self.music = MusicState::error("Укажите ключ AudD ниже — без него распознавание не работает");
+            self.push_state();
+            self.push_music();
+            return;
+        }
+        self.music_busy.store(true, Ordering::SeqCst);
+        self.music = MusicState::new("listening");
+        self.push_state();
+        self.push_music();
+
+        let mic = self.settings.music_source == "mic";
+        let (p, busy) = (self.proxy.clone(), self.music_busy.clone());
+        std::thread::spawn(move || {
+            let send = |m: MusicState| {
+                let _ = p.send_event(UserEvent::Music(m));
+            };
+            match music::record(mic, 10) {
+                Err(e) => send(MusicState::error(e)),
+                Ok(wav) => {
+                    send(MusicState::new("searching"));
+                    match music::recognize(&token, &wav) {
+                        Ok(Some(song)) => send(MusicState { status: "found".into(), song: Some(song), msg: String::new() }),
+                        Ok(None) => send(MusicState::new("notfound")),
+                        Err(e) => send(MusicState::error(e)),
+                    }
+                }
+            }
+            busy.store(false, Ordering::SeqCst);
+        });
     }
 
     fn rebuild_tabs(&mut self) {
@@ -664,12 +886,15 @@ impl App {
                 }
             }
             Cmd::OpenPanel { name } => {
-                if name == "history" || name == "settings" {
+                if matches!(name.as_str(), "history" | "settings" | "ext" | "music") {
                     self.panel = name.clone();
                     self.layout();
                     self.push_state();
-                    if name == "history" {
-                        self.push_history();
+                    match name.as_str() {
+                        "history" => self.push_history(),
+                        "ext" => self.refresh_ext(),
+                        "music" => self.push_music(),
+                        _ => {}
                     }
                 }
             }
@@ -735,6 +960,67 @@ impl App {
                 self.refresh_newtabs();
                 self.push_state();
             }
+            Cmd::SetAdblockLevel { level } => {
+                if level == "basic" || level == "strong" {
+                    self.settings.adblock_level = level.clone();
+                    self.save_settings();
+                    if level == "strong" {
+                        self.filters_status = "Загрузка фильтров…".into();
+                        self.spawn_filters(false);
+                    } else {
+                        *self.filters.borrow_mut() = None; // освобождаем память движка
+                        self.filters_status = "Выключено (базовый режим)".into();
+                    }
+                    self.push_state();
+                }
+            }
+            Cmd::UpdateFilters => {
+                if self.settings.adblock_level == "strong" {
+                    self.filters_status = "Обновление фильтров…".into();
+                    self.spawn_filters(true);
+                    self.push_state();
+                }
+            }
+            Cmd::Recognize => self.start_recognize(),
+            Cmd::SetMusic { token, source } => {
+                let token = token.trim().to_string();
+                let ok_token = token.len() < 200 && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+                if ok_token && (source == "system" || source == "mic") {
+                    self.settings.audd_token = token;
+                    self.settings.music_source = source;
+                    self.save_settings();
+                    self.push_state();
+                }
+            }
+            Cmd::ExtOpenDir => {
+                let _ = fs::create_dir_all(&self.ext_dir);
+                let _ = std::process::Command::new("explorer.exe").arg(&self.ext_dir).spawn();
+            }
+            Cmd::ExtRefresh => self.refresh_ext(),
+            Cmd::ExtInstall { input } => {
+                if self.incognito {
+                    let _ = self.proxy.send_event(UserEvent::ExtChanged("В режиме инкогнито расширения недоступны".into()));
+                } else {
+                    let _ = self.proxy.send_event(UserEvent::ExtChanged("Скачиваю расширение…".into()));
+                    let (dir, p) = (self.ext_dir.clone(), self.proxy.clone());
+                    std::thread::spawn(move || {
+                        let r = ext::install_crx(&dir, &input);
+                        let _ = p.send_event(UserEvent::ExtInstalled(r));
+                    });
+                }
+            }
+            Cmd::ExtToggle { id, on } => {
+                let p = self.proxy.clone();
+                ext::set_enabled(&self.ui, id, on, move || {
+                    let _ = p.send_event(UserEvent::ExtChanged(String::new()));
+                });
+            }
+            Cmd::ExtRemove { id } => {
+                let p = self.proxy.clone();
+                ext::remove(&self.ui, id, move || {
+                    let _ = p.send_event(UserEvent::ExtChanged("Расширение удалено".into()));
+                });
+            }
         }
     }
 
@@ -773,6 +1059,12 @@ impl App {
                 }
                 if finished {
                     self.record_history(id);
+                    self.apply_cosmetic(id);
+                    let p = self.proxy.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(2500));
+                        let _ = p.send_event(UserEvent::Cosmetic(id));
+                    });
                 }
                 self.push_state();
             }
@@ -803,9 +1095,68 @@ impl App {
                         changed = true;
                     }
                 }
+                // скрытые вкладки приостанавливаем (кроме сайтов с музыкой и видео)
+                for t in self.tabs.iter_mut() {
+                    if t.id != active
+                        && !t.suspended
+                        && !t.loading
+                        && t.last_active.elapsed() > SUSPEND_AFTER
+                        && !keeps_awake(&t.url)
+                    {
+                        if let Some(wv) = &t.webview {
+                            hook::suspend(wv);
+                            t.suspended = true;
+                        }
+                    }
+                }
                 if changed {
                     self.push_state();
                 }
+            }
+            UserEvent::FiltersBuilt(f) => {
+                if self.settings.adblock_level == "strong" {
+                    *self.filters.borrow_mut() = Some(f);
+                    self.push_state();
+                }
+            }
+            UserEvent::FiltersStatus(m) => {
+                if self.settings.adblock_level == "strong" {
+                    self.filters_status = m;
+                    self.push_state();
+                }
+            }
+            UserEvent::Cosmetic(id) => self.apply_cosmetic(id),
+            UserEvent::Harvest(id, res) => self.apply_generic(id, &res),
+            UserEvent::Extensions(json) => {
+                let _ = self.ui.evaluate_script(&format!("window.onExt({json})"));
+            }
+            UserEvent::ExtInstalled(res) => match res {
+                Ok(dir) => {
+                    let p = self.proxy.clone();
+                    ext::add(&self.ui, &dir, move |ok| {
+                        let msg = if ok {
+                            "Расширение установлено"
+                        } else {
+                            "Не удалось добавить расширение (оно может не поддерживаться WebView2)"
+                        };
+                        let _ = p.send_event(UserEvent::ExtChanged(msg.to_string()));
+                    });
+                }
+                Err(e) => {
+                    let _ = self.proxy.send_event(UserEvent::ExtChanged(e));
+                }
+            },
+            UserEvent::ExtChanged(msg) => {
+                if !msg.is_empty() {
+                    if let Ok(j) = serde_json::to_string(&msg) {
+                        let _ = self.ui.evaluate_script(&format!("window.onExtMsg({j})"));
+                    }
+                }
+                self.refresh_ext();
+            }
+            UserEvent::Music(m) => {
+                self.music = m;
+                self.push_music();
             }
         }
     }
@@ -817,7 +1168,10 @@ fn main() {
     // профиль и настройки: %LOCALAPPDATA%\Lumen
     let dir = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("Lumen");
     let filters_dir = dir.join("filters");
-    let _ = fs::create_dir_all(&filters_dir);
+    let lists_dir = filters_dir.join("lists");
+    let ext_dir = dir.join("extensions");
+    let _ = fs::create_dir_all(&lists_dir);
+    let _ = fs::create_dir_all(&ext_dir);
 
     let profile_dir = if incognito {
         std::env::temp_dir().join(format!("Lumen-incognito-{}", std::process::id()))
@@ -879,6 +1233,7 @@ fn main() {
     let ui = WebViewBuilder::with_web_context(&mut ctx)
         .with_devtools(cfg!(debug_assertions))
         .with_incognito(incognito)
+        .with_browser_extensions_enabled(!incognito) // у всех WebView одного профиля параметры должны совпадать
         .with_additional_browser_args(BROWSER_ARGS) // у всех WebView одного профиля аргументы должны совпадать
         .with_html(UI_HTML)
         .with_bounds(ui_rect(&window))
@@ -912,8 +1267,16 @@ fn main() {
         profile_dir,
         blocker: Rc::new(Blocker::load(&filters_dir)),
         proxy,
+        filters: Rc::new(RefCell::new(None)),
+        filters_status: "Загрузка фильтров…".into(),
+        lists_dir,
+        user_filters_dir: filters_dir,
+        ext_dir,
+        music: MusicState::new("idle"),
+        music_busy: Arc::new(AtomicBool::new(false)),
     };
     app.new_tab(None);
+    app.spawn_filters(false);
 
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
