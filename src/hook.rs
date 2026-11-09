@@ -3,18 +3,20 @@
 
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
     },
 };
 
 use webview2_com::{
     take_pwstr,
     Microsoft::Web::WebView2::Win32::*,
-    TrySuspendCompletedHandler, WebResourceRequestedEventHandler,
+    AcceleratorKeyPressedEventHandler, TrySuspendCompletedHandler, WebResourceRequestedEventHandler,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT};
 use windows_core::{Interface, HSTRING, PWSTR};
 use wry::{WebView, WebViewExtWindows};
 
@@ -22,6 +24,28 @@ use crate::filters::Filters;
 
 /// Движок фильтров, общий для всех вкладок (появляется после загрузки списков).
 pub type SharedFilters = Rc<RefCell<Option<Arc<Filters>>>>;
+
+/// Счётчик заблокированных запросов и последние заблокированные адреса (для диагностики).
+pub struct Stats {
+    pub count: AtomicU64,
+    pub recent: Mutex<VecDeque<String>>,
+}
+
+impl Stats {
+    pub fn new() -> Self {
+        Self { count: AtomicU64::new(0), recent: Mutex::new(VecDeque::new()) }
+    }
+
+    pub fn add(&self, url: &str) {
+        self.count.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut r) = self.recent.lock() {
+            r.push_back(url.chars().take(160).collect());
+            while r.len() > 20 {
+                r.pop_front();
+            }
+        }
+    }
+}
 
 fn strip_fragment(u: &str) -> &str {
     u.split('#').next().unwrap_or(u)
@@ -34,6 +58,7 @@ pub fn install_blocker(
     filters: SharedFilters,
     enabled: Arc<AtomicBool>,
     page: Rc<RefCell<String>>,
+    stats: Arc<Stats>,
 ) -> windows_core::Result<()> {
     unsafe {
         let core = wv.controller().CoreWebView2()?;
@@ -86,6 +111,7 @@ pub fn install_blocker(
                 };
 
                 if f.should_block(&url, &page_url, rtype) {
+                    stats.add(&url);
                     let resp = env.CreateWebResourceResponse(
                         None,
                         403,
@@ -123,4 +149,37 @@ pub fn resume(wv: &WebView) {
             }
         }
     }
+}
+
+/// Горячие клавиши, которые работают, даже когда фокус внутри страницы.
+/// `on_key(виртуальный_код, ctrl, shift, alt)` возвращает true, если клавиша обработана.
+pub fn install_shortcuts(
+    wv: &WebView,
+    on_key: impl Fn(u32, bool, bool, bool) -> bool + 'static,
+) -> windows_core::Result<()> {
+    unsafe {
+        let controller = wv.controller();
+        let mut token = Default::default();
+        controller.add_AcceleratorKeyPressed(
+            &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut kind = COREWEBVIEW2_KEY_EVENT_KIND::default();
+                args.KeyEventKind(&mut kind)?;
+                if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                    && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+                {
+                    return Ok(());
+                }
+                let mut vk = 0u32;
+                args.VirtualKey(&mut vk)?;
+                let down = |k: i32| GetKeyState(k) < 0;
+                if on_key(vk, down(VK_CONTROL.0 as i32), down(VK_SHIFT.0 as i32), down(VK_MENU.0 as i32)) {
+                    args.SetHandled(true)?;
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    Ok(())
 }

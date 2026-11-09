@@ -14,13 +14,37 @@ use adblock::{
     Engine,
 };
 
-/// Имя файла и адрес списка. RU AdList и AdGuard Russian нужны для российских сайтов
-/// (Яндекс, VK, mail.ru и др.).
-pub const LISTS: &[(&str, &str)] = &[
-    ("easylist", "https://easylist.to/easylist/easylist.txt"),
-    ("ruadlist", "https://easylist-downloads.adblockplus.org/advblock.txt"),
-    ("adguard-ru", "https://filters.adtidy.org/extension/ublock/filters/1.txt"),
-    ("ublock", "https://ublockorigin.github.io/uAssets/filters/filters.txt"),
+/// Имя файла и запасные адреса списка (пробуем по очереди).
+/// RU AdList и AdGuard Russian нужны для российских сайтов (Яндекс, VK, mail.ru и др.).
+pub const LISTS: &[(&str, &[&str])] = &[
+    (
+        "easylist",
+        &[
+            "https://easylist.to/easylist/easylist.txt",
+            "https://raw.githubusercontent.com/easylist/easylist/gh-pages/easylist.txt",
+        ],
+    ),
+    (
+        "ruadlist",
+        &[
+            "https://easylist-downloads.adblockplus.org/advblock.txt",
+            "https://raw.githubusercontent.com/easylist/ruadlist/master/advblock.txt",
+        ],
+    ),
+    (
+        "adguard-ru",
+        &[
+            "https://filters.adtidy.org/extension/ublock/filters/1.txt",
+            "https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_1_Russian/filter.txt",
+        ],
+    ),
+    (
+        "ublock",
+        &[
+            "https://ublockorigin.github.io/uAssets/filters/filters.txt",
+            "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt",
+        ],
+    ),
 ];
 
 const REFRESH_AFTER: Duration = Duration::from_secs(3 * 24 * 3600);
@@ -32,6 +56,7 @@ pub struct Filters {
 
 pub struct Cosmetic {
     pub hide: HashSet<String>,
+    pub procedural: HashSet<String>,
     pub exceptions: HashSet<String>,
     pub generichide: bool,
 }
@@ -77,7 +102,12 @@ impl Filters {
 
     pub fn cosmetic(&self, url: &str) -> Cosmetic {
         let r = self.engine.url_cosmetic_resources(url);
-        Cosmetic { hide: r.hide_selectors, exceptions: r.exceptions, generichide: r.generichide }
+        Cosmetic {
+            hide: r.hide_selectors,
+            procedural: r.procedural_actions,
+            exceptions: r.exceptions,
+            generichide: r.generichide,
+        }
     }
 
     pub fn generic(&self, classes: &[String], ids: &[String], exceptions: &HashSet<String>) -> Vec<String> {
@@ -85,11 +115,38 @@ impl Filters {
     }
 }
 
+fn fetch(url: &str, tmp: &Path) -> Option<String> {
+    let ok = crate::sys::curl_download(url, tmp);
+    let text = if ok { fs::read(tmp).ok().map(|b| String::from_utf8_lossy(&b).into_owned()) } else { None };
+    let _ = fs::remove_file(tmp);
+    text
+}
+
+/// Разворачивает строки `%include файл%` (так устроен RU AdList на GitHub).
+fn expand_includes(text: String, base: &str, tmp: &Path, depth: u8) -> String {
+    if depth == 0 || !text.contains("%include ") {
+        return text;
+    }
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        if let Some(name) = line.trim().strip_prefix("%include ").and_then(|r| r.strip_suffix('%')) {
+            if let Some(inc) = fetch(&format!("{base}{}", name.trim()), tmp) {
+                out.push_str(&expand_includes(inc, base, tmp, depth - 1));
+                out.push('\n');
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
 /// Скачивает устаревшие списки. Возвращает число обновлённых.
 pub fn update_lists(dir: &Path, force: bool) -> usize {
     let _ = fs::create_dir_all(dir);
     let mut n = 0;
-    for (name, url) in LISTS {
+    for (name, urls) in LISTS {
         let path = dir.join(format!("{name}.txt"));
         let fresh = !force
             && fs::metadata(&path)
@@ -102,13 +159,17 @@ pub fn update_lists(dir: &Path, force: bool) -> usize {
             continue;
         }
         let tmp = dir.join(format!("{name}.tmp"));
-        let ok = crate::sys::curl_download(url, &tmp)
-            && fs::metadata(&tmp).map(|m| m.len() > 10_000).unwrap_or(false);
-        if ok {
-            let _ = fs::rename(&tmp, &path);
-            n += 1;
-        } else {
-            let _ = fs::remove_file(&tmp);
+        for url in *urls {
+            let Some(text) = fetch(url, &tmp) else { continue };
+            let base = &url[..url.rfind('/').map(|i| i + 1).unwrap_or(url.len())];
+            let text = expand_includes(text, base, &tmp, 2);
+            if text.len() > 10_000 {
+                let part = dir.join(format!("{name}.part"));
+                if fs::write(&part, text).is_ok() && fs::rename(&part, &path).is_ok() {
+                    n += 1;
+                    break;
+                }
+            }
         }
     }
     n

@@ -22,12 +22,21 @@ fn profile(wv: &WebView) -> windows_core::Result<ICoreWebView2Profile7> {
     }
 }
 
-/// Добавляет распакованное расширение из папки.
-pub fn add(wv: &WebView, dir: &Path, done: impl FnOnce(bool) + 'static) {
-    let Ok(p) = profile(wv) else { return done(false) };
+/// Добавляет распакованное расширение из папки. `done` получает идентификатор расширения (None — ошибка).
+pub fn add(wv: &WebView, dir: &Path, done: impl FnOnce(Option<String>) + 'static) {
+    let Ok(p) = profile(wv) else { return done(None) };
     let path = HSTRING::from(dir);
-    let handler = ProfileAddBrowserExtensionCompletedHandler::create(Box::new(move |res, _| {
-        done(res.is_ok());
+    let handler = ProfileAddBrowserExtensionCompletedHandler::create(Box::new(move |res, ext| {
+        let id = if res.is_ok() {
+            ext.and_then(|e| unsafe {
+                let mut raw = PWSTR::null();
+                e.Id(&mut raw).ok()?;
+                Some(take_pwstr(raw))
+            })
+        } else {
+            None
+        };
+        done(id);
         Ok(())
     }));
     unsafe {

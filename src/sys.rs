@@ -14,7 +14,7 @@ pub fn hidden(program: &str) -> Command {
 /// Скачивает `url` в `dest`. Возвращает true при успехе.
 pub fn curl_download(url: &str, dest: &Path) -> bool {
     hidden("curl.exe")
-        .args(["-L", "-f", "-sS", "--max-time", "90", "-o"])
+        .args(["-L", "-f", "-sS", "--connect-timeout", "8", "--max-time", "90", "-o"])
         .arg(dest)
         .arg(url)
         .status()

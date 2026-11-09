@@ -15,8 +15,11 @@ dirs = "5"
 adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 webview2-com = "0.33"
 windows-core = "0.58"
-windows = { version = "0.58", features = ["Win32_Foundation"] }
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse"] }
 cpal = "0.15"
+
+[build-dependencies]
+embed-resource = "3"
 
 [profile.release]
 opt-level = 3

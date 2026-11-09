@@ -24,7 +24,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#AppExe}
-; SetupIconFile=..\assets\lumen.ico
+SetupIconFile=..\assets\lumen.ico
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"

@@ -34,6 +34,37 @@
   input:focus { border-color:var(--acc); transform:translateY(-1px);
     box-shadow:0 6px 24px color-mix(in srgb, var(--acc) 28%, transparent); }
   p { margin:0; color:var(--mute); font-size:.82em; text-align:center; line-height:1.5; }
+  /* быстрые ссылки */
+  #tiles { width:min(780px,92vw); display:grid; grid-template-columns:repeat(auto-fill,92px); gap:16px 14px; justify-content:center; }
+  .tile { position:relative; display:flex; flex-direction:column; align-items:center; gap:8px; width:92px; padding:10px 4px 8px; border:0;
+    border-radius:16px; background:transparent; color:var(--fg); text-decoration:none; cursor:pointer; font:inherit; font-size:.82em;
+    transition:background-color .18s, transform .18s var(--ease); animation:rise .45s var(--ease) both; }
+  .tile:hover { background:color-mix(in srgb, var(--fg) 10%, transparent); transform:translateY(-2px); }
+  [data-bg="1"] .tile:hover { background:rgba(255,255,255,.18); }
+  .ic { position:relative; width:56px; height:56px; border-radius:15px; display:grid; place-items:center; overflow:hidden;
+    color:#fff; font-size:1.6em; font-weight:600; box-shadow:0 2px 10px rgba(0,0,0,.18); }
+  .ic img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#fff; padding:9px; }
+  .nm { max-width:88px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; text-shadow:0 1px 6px rgba(0,0,0,.25); }
+  .add .ic { background:color-mix(in srgb, var(--fg) 14%, transparent); color:var(--fg); box-shadow:none; font-size:1.9em; font-weight:300; }
+  [data-bg="1"] .add .ic { background:rgba(255,255,255,.2); }
+  .del { position:absolute; top:2px; right:6px; width:20px; height:20px; border:0; border-radius:50%; background:rgba(0,0,0,.55); color:#fff;
+    font-size:11px; line-height:20px; cursor:pointer; opacity:0; transition:opacity .15s; }
+  .tile:hover .del { opacity:1; }
+  #dlg { position:fixed; inset:0; z-index:5; display:grid; place-items:center; background:rgba(0,0,0,.45); backdrop-filter:blur(4px);
+    animation:fade .2s ease both; }
+  #dlg[hidden] { display:none; }
+  #dlg form { width:min(380px,90vw); padding:22px; border-radius:18px; background:var(--card); color:var(--fg); box-shadow:0 18px 60px rgba(0,0,0,.4);
+    animation:rise .3s var(--ease) both; }
+  [data-bg="1"] #dlg form { background:#1c1d22; color:#fff; --line:rgba(255,255,255,.2); --mute:rgba(255,255,255,.7); }
+  #dlg h2 { margin:0 0 14px; font-size:1.25em; font-weight:600; }
+  #dlg input { height:2.6em; margin-bottom:10px; border-radius:10px; padding:0 14px; background:transparent; backdrop-filter:none; }
+  #dlg .btns { display:flex; gap:10px; justify-content:flex-end; margin-top:6px; }
+  #dlg button { height:2.4em; padding:0 18px; border:1px solid var(--line); border-radius:10px; background:transparent; color:inherit; font:inherit; cursor:pointer;
+    transition:background-color .15s, transform .1s; }
+  #dlg button:active { transform:scale(.96); }
+  #dlg button.ok { background:var(--acc); border-color:var(--acc); color:#fff; }
+  [data-bg="1"] #dlg button.ok { background:#fff; color:#111; }
+  @keyframes fade { from { opacity:0; } to { opacity:1; } }
   @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
   @media (prefers-reduced-motion: reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
 </style>
@@ -46,12 +77,59 @@
   <form action="https://lumen.invalid/s" method="get">
     <input name="q" placeholder="Поиск или адрес сайта" autofocus autocomplete="off" spellcheck="false">
   </form>
+  <div id="tiles"></div>
   <p id="t"></p>
 </main>
+<div id="dlg" hidden>
+  <form id="dform" autocomplete="off">
+    <h2>Новая быстрая ссылка</h2>
+    <input id="dn" placeholder="Название (необязательно)" spellcheck="false">
+    <input id="du" placeholder="Адрес сайта, например example.com" spellcheck="false">
+    <div class="btns"><button type="button" id="dc">Отмена</button><button type="submit" class="ok">Добавить</button></div>
+  </form>
+</div>
 <script>
-  document.getElementById('t').innerHTML = document.documentElement.dataset.incognito === '1'
+  const LINKS = /*__LINKS__*/[];
+  const INC = document.documentElement.dataset.incognito === '1';
+  document.getElementById('t').innerHTML = INC
     ? '🕶 Режим инкогнито<br>История, куки и кэш не сохраняются и удаляются после закрытия окна'
     : 'Быстро. Тихо. Без рекламы.';
+
+  const cmd = (path, params) => { location.href = 'https://lumen.invalid/' + path + '?' + new URLSearchParams(params).toString(); };
+  const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+  const tiles = document.getElementById('tiles');
+  if (!INC) {
+    LINKS.forEach((l, i) => {
+      let host = '';
+      try { host = new URL(l.u).hostname.replace(/^www\./, ''); } catch (_) {}
+      const a = document.createElement('a'); a.className = 'tile'; a.href = l.u; a.title = l.u;
+      a.style.animationDelay = (i * 25) + 'ms';
+      const ic = document.createElement('span'); ic.className = 'ic';
+      ic.style.background = `linear-gradient(135deg,hsl(${hue(host)},62%,52%),hsl(${(hue(host) + 40) % 360},62%,42%))`;
+      ic.textContent = (l.t || host || '?').trim().charAt(0).toUpperCase();
+      const img = new Image(); img.alt = ''; img.src = 'https://' + host + '/favicon.ico';
+      img.onload = () => { if (img.naturalWidth > 15) ic.append(img); };
+      const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = l.t || host;
+      const del = document.createElement('button'); del.className = 'del'; del.type = 'button'; del.textContent = '✕'; del.title = 'Удалить';
+      del.onclick = (e) => { e.preventDefault(); e.stopPropagation(); cmd('del', { i }); };
+      a.append(ic, nm, del); tiles.append(a);
+    });
+    const add = document.createElement('button'); add.className = 'tile add'; add.type = 'button';
+    add.style.animationDelay = (LINKS.length * 25) + 'ms';
+    add.innerHTML = '<span class="ic">+</span><span class="nm">Добавить</span>';
+    add.onclick = () => { dlg.hidden = false; dn.value = ''; du.value = ''; du.focus(); };
+    tiles.append(add);
+  }
+  const dlg = document.getElementById('dlg'), dn = document.getElementById('dn'), du = document.getElementById('du');
+  document.getElementById('dc').onclick = () => { dlg.hidden = true; };
+  dlg.onclick = (e) => { if (e.target === dlg) dlg.hidden = true; };
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') dlg.hidden = true; });
+  document.getElementById('dform').onsubmit = (e) => {
+    e.preventDefault();
+    if (!du.value.trim()) { du.focus(); return; }
+    dlg.hidden = true;
+    cmd('add', { t: dn.value, u: du.value });
+  };
 </script>
 </body>
 </html>

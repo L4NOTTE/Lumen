@@ -9,6 +9,7 @@ mod sys;
 
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fs,
     path::PathBuf,
     rc::Rc,
@@ -72,6 +73,88 @@ const HARVEST_JS: &str = "(()=>{const c=new Set(),i=new Set();\
 struct Harvest {
     c: Vec<String>,
     i: Vec<String>,
+}
+
+/// Скрипт косметического движка: процедурные правила и скрытие карточек «Реклама».
+const RUNTIME_JS: &str = include_str!("runtime.js");
+/// Значок окна (64×64, RGBA).
+const ICON_RGBA: &[u8] = include_bytes!("../assets/icon64.rgba");
+
+#[derive(Serialize, Deserialize, Clone)]
+struct Link {
+    t: String,
+    u: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct SavedTab {
+    u: String,
+    t: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct Session {
+    active: usize,
+    tabs: Vec<SavedTab>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Shortcut {
+    NewTab,
+    Reopen,
+    CloseTab,
+    FocusUrl,
+    Incognito,
+    History,
+    Settings,
+    Music,
+    AddLink,
+    NextTab,
+    PrevTab,
+    Back,
+    Forward,
+    Tab(usize),
+}
+
+enum LinkCmd {
+    Add(String, String),
+    Del(usize),
+}
+
+/// Сопоставление клавиш (виртуальные коды Windows) с действиями браузера.
+fn map_key(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut> {
+    use Shortcut::*;
+    match (vk, ctrl, shift, alt) {
+        (0x54, true, false, false) => Some(NewTab),            // Ctrl+T
+        (0x54, true, true, false) => Some(Reopen),             // Ctrl+Shift+T
+        (0x57, true, false, false) => Some(CloseTab),          // Ctrl+W
+        (0x4C, true, false, false) | (0x75, false, false, false) => Some(FocusUrl), // Ctrl+L, F6
+        (0x4E, true, true, false) => Some(Incognito),          // Ctrl+Shift+N
+        (0x48, true, false, false) => Some(History),           // Ctrl+H
+        (0xBC, true, false, false) => Some(Settings),          // Ctrl+,
+        (0x4D, true, false, false) => Some(Music),             // Ctrl+M
+        (0x44, true, false, false) => Some(AddLink),           // Ctrl+D
+        (0x09, true, false, false) => Some(NextTab),           // Ctrl+Tab
+        (0x09, true, true, false) => Some(PrevTab),            // Ctrl+Shift+Tab
+        (0x25, false, false, true) => Some(Back),              // Alt+←
+        (0x27, false, false, true) => Some(Forward),           // Alt+→
+        (0x31..=0x39, true, false, false) => Some(Tab((vk - 0x31) as usize)), // Ctrl+1…9
+        _ => None,
+    }
+}
+
+fn normalize_url(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let full = if t.contains("://") { t.to_string() } else { format!("https://{t}") };
+    let p = url::Url::parse(&full).ok()?;
+    if !matches!(p.scheme(), "http" | "https") {
+        return None;
+    }
+    p.host_str()?;
+    Some(p.to_string())
 }
 
 /// Сколько записей истории хранить.
@@ -187,6 +270,8 @@ struct Settings {
     adblock_level: String,
     audd_token: String,
     music_source: String,
+    startup: String,
+    hide_labels: bool,
 }
 
 impl Default for Settings {
@@ -202,6 +287,8 @@ impl Default for Settings {
             adblock_level: "strong".into(),
             audd_token: String::new(),
             music_source: "system".into(),
+            startup: "restore".into(),
+            hide_labels: true,
         }
     }
 }
@@ -232,6 +319,9 @@ enum UserEvent {
     ExtInstalled(Result<PathBuf, String>),
     ExtChanged(String),
     Music(MusicState),
+    Shortcut(Shortcut),
+    Link(LinkCmd),
+    ExtAdded(PathBuf, Option<String>),
 }
 
 #[derive(Deserialize)]
@@ -266,6 +356,10 @@ enum Cmd {
     ExtToggle { id: String, on: bool },
     ExtRemove { id: String },
     ExtRefresh,
+    ExtOpen { id: String },
+    AddCurrentLink,
+    SetStartup { mode: String },
+    SetLabels { on: bool },
 }
 
 // ---------- приложение ----------
@@ -310,6 +404,14 @@ struct App {
     ext_dir: PathBuf,
     music: MusicState,
     music_busy: Arc<AtomicBool>,
+    stats: Arc<hook::Stats>,
+    links: Vec<Link>,
+    links_path: PathBuf,
+    closed: Vec<(String, String)>,
+    session_path: PathBuf,
+    last_session: RefCell<String>,
+    ext_map: HashMap<String, String>,
+    ext_map_path: PathBuf,
 }
 
 fn toolbar_px(w: &Window) -> u32 {
@@ -456,7 +558,14 @@ impl App {
                 None => ("0", String::new()),
             }
         };
+        let links_json = if self.incognito {
+            "[]".to_string()
+        } else {
+            serde_json::to_string(&self.links).unwrap_or_else(|_| "[]".into())
+        }
+        .replace("</", "<\\/");
         NEWTAB_HTML
+            .replace("/*__LINKS__*/[]", &links_json)
             .replace("__INC__", if self.incognito { "1" } else { "0" })
             .replace("__THEME__", theme)
             .replace("__BGATTR__", bg_attr)
@@ -521,8 +630,28 @@ impl App {
 
                 // поисковая строка стартовой страницы
                 if parsed.host_str() == Some("lumen.invalid") {
-                    if let Some((_, q)) = parsed.query_pairs().find(|(k, _)| k == "q") {
-                        let _ = p_nav.send_event(UserEvent::Search(id, q.into_owned()));
+                    // команды работают только со стартовой страницы (у неё адрес страницы ещё пуст)
+                    let on_newtab = page_nav.borrow().is_empty();
+                    let q = |name: &str| {
+                        parsed.query_pairs().find(|(k, _)| k == name).map(|(_, v)| v.into_owned())
+                    };
+                    match parsed.path() {
+                        "/s" => {
+                            if let Some(text) = q("q") {
+                                let _ = p_nav.send_event(UserEvent::Search(id, text));
+                            }
+                        }
+                        "/add" if on_newtab => {
+                            if let Some(u) = q("u") {
+                                let _ = p_nav.send_event(UserEvent::Link(LinkCmd::Add(q("t").unwrap_or_default(), u)));
+                            }
+                        }
+                        "/del" if on_newtab => {
+                            if let Some(i) = q("i").and_then(|v| v.parse::<usize>().ok()) {
+                                let _ = p_nav.send_event(UserEvent::Link(LinkCmd::Del(i)));
+                            }
+                        }
+                        _ => {}
                     }
                     return false;
                 }
@@ -554,12 +683,24 @@ impl App {
         if need_basic {
             b = b.with_initialization_script(self.blocker.script());
         }
+        if self.settings.adblock {
+            let rt = format!("window.__lumenCfg={{labels:{}}};\n{}", self.settings.hide_labels, RUNTIME_JS);
+            b = b.with_initialization_script(&rt);
+        }
+        let p_key = self.proxy.clone();
         b = match url {
             Some(u) => b.with_url(u),
             None => b.with_html(newtab),
         };
         let wv = b.build_as_child(&self.window).expect("не удалось создать WebView2");
-        let _ = hook::install_blocker(&wv, self.filters.clone(), self.adblock.clone(), page);
+        let _ = hook::install_blocker(&wv, self.filters.clone(), self.adblock.clone(), page, self.stats.clone());
+        let _ = hook::install_shortcuts(&wv, move |vk, ctrl, shift, alt| match map_key(vk, ctrl, shift, alt) {
+            Some(sc) => {
+                let _ = p_key.send_event(UserEvent::Shortcut(sc));
+                true
+            }
+            None => false,
+        });
         wv
     }
 
@@ -669,12 +810,23 @@ impl App {
                 "font_size": s.font_size,
                 "bg_mode": s.bg_mode,
                 "has_bg": self.bg_data.is_some(),
+                "startup": s.startup,
+                "labels": s.hide_labels,
             },
             "look": { "al": al, "ad": ad, "font": font_stack(&s.font), "fs": font_px(&s.font_size) },
             "filters": { "level": s.adblock_level, "status": self.filters_status },
+            "block": {
+                "count": self.stats.count.load(Ordering::Relaxed),
+                "recent": if self.panel == "settings" {
+                    self.stats.recent.lock().map(|r| r.iter().rev().cloned().collect::<Vec<_>>()).unwrap_or_default()
+                } else {
+                    Vec::new()
+                },
+            },
             "music_cfg": { "token": s.audd_token, "source": s.music_source },
         });
         let _ = self.ui.evaluate_script(&format!("window.onState({state})"));
+        self.save_session();
     }
 
     fn with_active(&self, f: impl FnOnce(&WebView)) {
@@ -686,6 +838,93 @@ impl App {
         {
             f(wv);
         }
+    }
+
+    fn save_session(&self) {
+        if self.incognito {
+            return;
+        }
+        let real: Vec<&Tab> = self.tabs.iter().filter(|t| t.url.starts_with("http")).collect();
+        let session = Session {
+            active: real.iter().position(|t| t.id == self.active).unwrap_or(0),
+            tabs: real.iter().map(|t| SavedTab { u: t.url.clone(), t: t.title.clone() }).collect(),
+        };
+        if let Ok(j) = serde_json::to_string(&session) {
+            if *self.last_session.borrow() != j {
+                let _ = fs::write(&self.session_path, &j);
+                *self.last_session.borrow_mut() = j;
+            }
+        }
+    }
+
+    /// Восстанавливает вкладки прошлого сеанса: загружается только активная, остальные «спят».
+    fn restore_session(&mut self, s: Session) {
+        for t in &s.tabs {
+            let id = self.next_id;
+            self.next_id += 1;
+            self.tabs.push(Tab {
+                id,
+                webview: None,
+                title: t.t.clone(),
+                url: t.u.clone(),
+                loading: false,
+                last_active: Instant::now(),
+                suspended: false,
+                low: false,
+            });
+        }
+        let idx = s.active.min(self.tabs.len().saturating_sub(1));
+        let id = self.tabs[idx].id;
+        self.activate(id);
+    }
+
+    fn toast(&self, msg: &str) {
+        if let Ok(j) = serde_json::to_string(msg) {
+            let _ = self.ui.evaluate_script(&format!("window.onToast&&window.onToast({j})"));
+        }
+    }
+
+    fn save_links(&self) {
+        if let Ok(j) = serde_json::to_string_pretty(&self.links) {
+            let _ = fs::write(&self.links_path, j);
+        }
+    }
+
+    fn add_link(&mut self, title: &str, url: &str) {
+        if self.incognito {
+            return;
+        }
+        let Some(u) = normalize_url(url) else {
+            self.toast("Не удалось добавить: проверьте адрес ссылки");
+            return;
+        };
+        let host = url::Url::parse(&u).ok().and_then(|p| p.host_str().map(|h| h.trim_start_matches("www.").to_string())).unwrap_or_default();
+        let t: String = if title.trim().is_empty() { host } else { title.trim().chars().take(40).collect() };
+        if let Some(l) = self.links.iter_mut().find(|l| l.u == u) {
+            l.t = t;
+        } else if self.links.len() >= 32 {
+            self.toast("Достигнут предел: 32 быстрые ссылки");
+            return;
+        } else {
+            self.links.push(Link { t, u });
+        }
+        self.save_links();
+        self.refresh_newtabs();
+        self.toast("Добавлено в быстрые ссылки");
+    }
+
+    /// Адрес окна расширения (всплывающее окно или страница настроек), если оно есть.
+    fn ext_page(&self, id: &str) -> Option<String> {
+        let dir = self.ext_dir.join(self.ext_map.get(id)?);
+        let raw = fs::read_to_string(dir.join("manifest.json")).ok()?;
+        let m: serde_json::Value = serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok()?;
+        let path = m["action"]["default_popup"]
+            .as_str()
+            .or(m["browser_action"]["default_popup"].as_str())
+            .or(m["page_action"]["default_popup"].as_str())
+            .or(m["options_ui"]["page"].as_str())
+            .or(m["options_page"].as_str())?;
+        Some(format!("chrome-extension://{id}/{}", path.trim_start_matches('/')))
     }
 
     fn spawn_filters(&self, force: bool) {
@@ -738,6 +977,10 @@ impl App {
         let css = selectors_to_css(cos.hide.iter());
         if !css.is_empty() {
             let _ = wv.evaluate_script(&inject_css_js("d", &css));
+        }
+        if !cos.procedural.is_empty() {
+            let arr = cos.procedural.iter().cloned().collect::<Vec<_>>().join(",");
+            let _ = wv.evaluate_script(&format!("window.__lumenSetRules&&window.__lumenSetRules([{arr}])"));
         }
         if !cos.generichide {
             let p = self.proxy.clone();
@@ -842,6 +1085,14 @@ impl App {
             Cmd::Ready => self.push_state(),
             Cmd::NewTab => self.new_tab(None),
             Cmd::CloseTab { id } => {
+                if let Some(t) = self.tabs.iter().find(|t| t.id == id) {
+                    if t.url.starts_with("http") {
+                        self.closed.push((t.url.clone(), t.title.clone()));
+                        if self.closed.len() > 20 {
+                            self.closed.remove(0);
+                        }
+                    }
+                }
                 self.tabs.retain(|t| t.id != id);
                 if self.tabs.is_empty() {
                     self.new_tab(None);
@@ -866,9 +1117,25 @@ impl App {
             Cmd::Forward => self.with_active(|wv| {
                 let _ = wv.evaluate_script("history.forward()");
             }),
-            Cmd::Reload => self.with_active(|wv| {
-                let _ = wv.evaluate_script("location.reload()");
-            }),
+            Cmd::Reload => {
+                // стартовая страница загружена из строки: обычное обновление превращает её в about:blank
+                let is_newtab = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.id == self.active)
+                    .map(|t| t.url.is_empty())
+                    .unwrap_or(false);
+                if is_newtab {
+                    let html = self.newtab_html();
+                    self.with_active(|wv| {
+                        let _ = wv.load_html(&html);
+                    });
+                } else {
+                    self.with_active(|wv| {
+                        let _ = wv.evaluate_script("location.reload()");
+                    });
+                }
+            }
             Cmd::SetEngine { engine } => {
                 self.settings.engine = engine;
                 self.save_settings();
@@ -1015,7 +1282,55 @@ impl App {
                     let _ = p.send_event(UserEvent::ExtChanged(String::new()));
                 });
             }
+            Cmd::ExtOpen { id } => match self.ext_page(&id) {
+                Some(u) => self.new_tab(Some(u)),
+                None => {
+                    let _ = self.proxy.send_event(UserEvent::ExtChanged(
+                        "У этого расширения нет окна. Переустановите его, чтобы кнопка «Открыть» заработала".into(),
+                    ));
+                }
+            },
+            Cmd::AddCurrentLink => {
+                let cur = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.id == self.active)
+                    .map(|t| (t.title.clone(), t.url.clone()));
+                match cur {
+                    Some((t, u)) if u.starts_with("http") => self.add_link(&t, &u),
+                    _ => self.toast("Откройте сайт, который хотите добавить"),
+                }
+            }
+            Cmd::SetStartup { mode } => {
+                if mode == "restore" || mode == "new" {
+                    self.settings.startup = mode;
+                    self.save_settings();
+                    self.push_state();
+                }
+            }
+            Cmd::SetLabels { on } => {
+                self.settings.hide_labels = on;
+                self.save_settings();
+                for t in &self.tabs {
+                    if let Some(wv) = &t.webview {
+                        let _ = wv.evaluate_script(&format!("window.__lumenCfg&&(window.__lumenCfg.labels={on})"));
+                    }
+                }
+                self.push_state();
+            }
             Cmd::ExtRemove { id } => {
+                if let Some(name) = self.ext_map.remove(&id) {
+                    if !name.contains(['/', '\\', '.']) {
+                        let dir = self.ext_dir.join(name);
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_secs(2));
+                            let _ = fs::remove_dir_all(dir);
+                        });
+                    }
+                    if let Ok(j) = serde_json::to_string(&self.ext_map) {
+                        let _ = fs::write(&self.ext_map_path, j);
+                    }
+                }
                 let p = self.proxy.clone();
                 ext::remove(&self.ui, id, move || {
                     let _ = p.send_event(UserEvent::ExtChanged("Расширение удалено".into()));
@@ -1062,8 +1377,10 @@ impl App {
                     self.apply_cosmetic(id);
                     let p = self.proxy.clone();
                     std::thread::spawn(move || {
-                        std::thread::sleep(Duration::from_millis(2500));
-                        let _ = p.send_event(UserEvent::Cosmetic(id));
+                        for ms in [2500u64, 5500] {
+                            std::thread::sleep(Duration::from_millis(ms));
+                            let _ = p.send_event(UserEvent::Cosmetic(id));
+                        }
                     });
                 }
                 self.push_state();
@@ -1128,22 +1445,83 @@ impl App {
             UserEvent::Cosmetic(id) => self.apply_cosmetic(id),
             UserEvent::Harvest(id, res) => self.apply_generic(id, &res),
             UserEvent::Extensions(json) => {
-                let _ = self.ui.evaluate_script(&format!("window.onExt({json})"));
+                let mut list: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap_or_default();
+                for e in list.iter_mut() {
+                    let id = e["id"].as_str().unwrap_or("").to_string();
+                    e["openable"] = self.ext_page(&id).is_some().into();
+                }
+                let j = serde_json::Value::Array(list);
+                let _ = self.ui.evaluate_script(&format!("window.onExt({j})"));
             }
             UserEvent::ExtInstalled(res) => match res {
                 Ok(dir) => {
                     let p = self.proxy.clone();
-                    ext::add(&self.ui, &dir, move |ok| {
-                        let msg = if ok {
-                            "Расширение установлено"
-                        } else {
-                            "Не удалось добавить расширение (оно может не поддерживаться WebView2)"
-                        };
-                        let _ = p.send_event(UserEvent::ExtChanged(msg.to_string()));
+                    let d = dir.clone();
+                    ext::add(&self.ui, &dir, move |id| {
+                        let _ = p.send_event(UserEvent::ExtAdded(d, id));
                     });
                 }
                 Err(e) => {
                     let _ = self.proxy.send_event(UserEvent::ExtChanged(e));
+                }
+            },
+            UserEvent::ExtAdded(dir, id) => {
+                let msg = match id {
+                    Some(id) => {
+                        if let Some(name) = dir.file_name().map(|n| n.to_string_lossy().to_string()) {
+                            self.ext_map.insert(id, name);
+                            if let Ok(j) = serde_json::to_string(&self.ext_map) {
+                                let _ = fs::write(&self.ext_map_path, j);
+                            }
+                        }
+                        "Расширение установлено"
+                    }
+                    None => "Не удалось добавить расширение (оно может не поддерживаться WebView2)",
+                };
+                let _ = self.proxy.send_event(UserEvent::ExtChanged(msg.to_string()));
+            }
+            UserEvent::Shortcut(sc) => match sc {
+                Shortcut::NewTab => self.new_tab(None),
+                Shortcut::Reopen => {
+                    if let Some((u, _)) = self.closed.pop() {
+                        self.new_tab(Some(u));
+                    }
+                }
+                Shortcut::CloseTab => self.cmd(Cmd::CloseTab { id: self.active }),
+                Shortcut::FocusUrl => {
+                    self.close_panel();
+                    let _ = self.ui.focus();
+                    let _ = self.ui.evaluate_script("(()=>{const u=document.getElementById('url');u.focus();u.select();})()");
+                }
+                Shortcut::Incognito => self.cmd(Cmd::Incognito),
+                Shortcut::History => self.cmd(Cmd::OpenPanel { name: "history".into() }),
+                Shortcut::Settings => self.cmd(Cmd::OpenPanel { name: "settings".into() }),
+                Shortcut::Music => self.cmd(Cmd::Recognize),
+                Shortcut::AddLink => self.cmd(Cmd::AddCurrentLink),
+                Shortcut::Back => self.cmd(Cmd::Back),
+                Shortcut::Forward => self.cmd(Cmd::Forward),
+                Shortcut::NextTab | Shortcut::PrevTab => {
+                    let n = self.tabs.len();
+                    if let Some(i) = self.tabs.iter().position(|t| t.id == self.active) {
+                        let j = if matches!(sc, Shortcut::NextTab) { (i + 1) % n } else { (i + n - 1) % n };
+                        let id = self.tabs[j].id;
+                        self.activate(id);
+                    }
+                }
+                Shortcut::Tab(i) => {
+                    if let Some(id) = self.tabs.get(i).map(|t| t.id) {
+                        self.activate(id);
+                    }
+                }
+            },
+            UserEvent::Link(c) => match c {
+                LinkCmd::Add(t, u) => self.add_link(&t, &u),
+                LinkCmd::Del(i) => {
+                    if i < self.links.len() && !self.incognito {
+                        self.links.remove(i);
+                        self.save_links();
+                        self.refresh_newtabs();
+                    }
                 }
             },
             UserEvent::ExtChanged(msg) => {
@@ -1179,6 +1557,9 @@ fn main() {
         dir.join("profile")
     };
 
+    let links_path = dir.join("links.json");
+    let session_path = dir.join("session.json");
+    let ext_map_path = dir.join("ext_map.json");
     let settings_path = dir.join("settings.json");
     let settings: Settings = fs::read_to_string(&settings_path)
         .ok()
@@ -1198,6 +1579,24 @@ fn main() {
         let cut = history.len() - HISTORY_MAX;
         history.drain(..cut);
     }
+
+    let links: Vec<Link> = fs::read_to_string(&links_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let session: Session = if incognito {
+        Session::default()
+    } else {
+        fs::read_to_string(&session_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    };
+    let ext_map: HashMap<String, String> = fs::read_to_string(&ext_map_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let restore = !incognito && settings.startup == "restore" && !session.tabs.is_empty();
 
     // своя фотография для главного экрана
     let bg_path = dir.join("background.txt");
@@ -1219,7 +1618,9 @@ fn main() {
         });
     }
 
+    let icon = tao::window::Icon::from_rgba(ICON_RGBA.to_vec(), 64, 64).ok();
     let window = WindowBuilder::new()
+        .with_window_icon(icon)
         .with_title(if incognito { "Lumen — Инкогнито" } else { "Lumen" })
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(640.0, 400.0))
@@ -1274,8 +1675,20 @@ fn main() {
         ext_dir,
         music: MusicState::new("idle"),
         music_busy: Arc::new(AtomicBool::new(false)),
+        stats: Arc::new(hook::Stats::new()),
+        links,
+        links_path,
+        closed: Vec::new(),
+        session_path,
+        last_session: RefCell::new(String::new()),
+        ext_map,
+        ext_map_path,
     };
-    app.new_tab(None);
+    if restore {
+        app.restore_session(session);
+    } else {
+        app.new_tab(None);
+    }
     app.spawn_filters(false);
 
     event_loop.run(move |event, _, flow| {
