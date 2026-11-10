@@ -63,7 +63,20 @@ pub fn install_blocker(
     unsafe {
         let core = wv.controller().CoreWebView2()?;
         let env = core.cast::<ICoreWebView2_2>()?.Environment()?;
-        core.AddWebResourceRequestedFilter(&HSTRING::from("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;
+        // перехватываем только то, что может быть рекламой (стили и шрифты не трогаем — меньше нагрузка)
+        for ctx in [
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_OTHER,
+        ] {
+            core.AddWebResourceRequestedFilter(&HSTRING::from("*"), ctx)?;
+        }
 
         let mut token = Default::default();
         core.add_WebResourceRequested(

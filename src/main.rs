@@ -15,7 +15,7 @@ use std::{
     rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        mpsc, Arc, OnceLock,
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -27,6 +27,7 @@ use music::MusicState;
 use serde::{Deserialize, Serialize};
 use tao::{
     event::{Event, WindowEvent},
+    platform::windows::WindowExtWindows,
     event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
@@ -40,14 +41,23 @@ const TOOLBAR_H: f64 = 80.0;
 const UI_HTML: &str = include_str!("../ui/ui.html");
 const NEWTAB_HTML: &str = include_str!("../ui/newtab.html");
 
-/// SmartScreen остаётся включённым, перевод страниц выключен,
-/// число процессов-рендереров ограничено (экономия оперативной памяти).
-const BROWSER_ARGS: &str = "--enable-features=ParallelDownloading \
-    --disable-features=Translate,msWebOOUI,msPdfOOUI \
-    --renderer-process-limit=4";
+/// Аргументы движка. SmartScreen остаётся включённым, перевод страниц выключен,
+/// число процессов ограничено, вкладки одного сайта делят процесс (экономия памяти).
+/// «Эконом-режим» дополнительно включает облегчённый режим Chromium и отключает кэш переходов назад.
+/// У всех окон одного профиля аргументы обязаны совпадать, поэтому строка считается один раз при запуске.
+fn browser_args(eco: bool) -> String {
+    let mut disabled = String::from("Translate,msWebOOUI,msPdfOOUI");
+    let mut extra = String::new();
+    if eco {
+        disabled.push_str(",BackForwardCache");
+        extra.push_str(" --enable-low-end-device-mode");
+    }
+    let limit = if eco { 3 } else { 4 };
+    format!(
+        "--enable-features=ParallelDownloading --disable-features={disabled} --renderer-process-limit={limit} --process-per-site{extra}"
+    )
+}
 
-/// Через сколько фоновая вкладка «засыпает» (выгружается из памяти).
-const SLEEP_AFTER: Duration = Duration::from_secs(5 * 60);
 const TICK_EVERY: Duration = Duration::from_secs(60);
 /// Через сколько скрытая вкладка приостанавливается (освобождает процессор и память).
 const SUSPEND_AFTER: Duration = Duration::from_secs(60);
@@ -272,6 +282,8 @@ struct Settings {
     music_source: String,
     startup: String,
     hide_labels: bool,
+    sleep_minutes: u32,
+    eco: bool,
 }
 
 impl Default for Settings {
@@ -289,6 +301,8 @@ impl Default for Settings {
             music_source: "system".into(),
             startup: "restore".into(),
             hide_labels: true,
+            sleep_minutes: 5,
+            eco: false,
         }
     }
 }
@@ -322,6 +336,8 @@ enum UserEvent {
     Shortcut(Shortcut),
     Link(LinkCmd),
     ExtAdded(PathBuf, Option<String>),
+    Flush,
+    Quit,
 }
 
 #[derive(Deserialize)]
@@ -360,6 +376,13 @@ enum Cmd {
     AddCurrentLink,
     SetStartup { mode: String },
     SetLabels { on: bool },
+    WinMin,
+    WinMax,
+    WinClose,
+    WinDrag,
+    DetachTab { id: u32, x: i32, y: i32 },
+    SetSleep { minutes: u32 },
+    SetEco { on: bool },
 }
 
 // ---------- приложение ----------
@@ -412,35 +435,64 @@ struct App {
     last_session: RefCell<String>,
     ext_map: HashMap<String, String>,
     ext_map_path: PathBuf,
+    secondary: bool,
+    args: String,
+    flush_tx: mpsc::Sender<()>,
+    flush_pending: Arc<AtomicBool>,
 }
 
 fn toolbar_px(w: &Window) -> u32 {
     (TOOLBAR_H * w.scale_factor()).round() as u32
 }
 
+/// Отступ от края окна: по нему окно без рамки можно растягивать мышью (в развёрнутом виде не нужен).
+fn inset_px(w: &Window) -> u32 {
+    if w.is_maximized() {
+        0
+    } else {
+        (5.0 * w.scale_factor()).round() as u32
+    }
+}
+
 fn content_rect(w: &Window) -> Rect {
     let sz = w.inner_size();
-    let top = toolbar_px(w);
+    let i = inset_px(w);
+    let top = i + toolbar_px(w);
     Rect {
-        position: PhysicalPosition::new(0i32, top as i32).into(),
-        size: PhysicalSize::new(sz.width, sz.height.saturating_sub(top)).into(),
+        position: PhysicalPosition::new(i as i32, top as i32).into(),
+        size: PhysicalSize::new(sz.width.saturating_sub(2 * i), sz.height.saturating_sub(top + i)).into(),
     }
 }
 
 fn ui_rect(w: &Window) -> Rect {
     let sz = w.inner_size();
+    let i = inset_px(w);
     Rect {
-        position: PhysicalPosition::new(0i32, 0i32).into(),
-        size: PhysicalSize::new(sz.width, toolbar_px(w).min(sz.height)).into(),
+        position: PhysicalPosition::new(i as i32, i as i32).into(),
+        size: PhysicalSize::new(sz.width.saturating_sub(2 * i), toolbar_px(w).min(sz.height)).into(),
     }
 }
 
 fn full_rect(w: &Window) -> Rect {
     let sz = w.inner_size();
+    let i = inset_px(w);
     Rect {
-        position: PhysicalPosition::new(0i32, 0i32).into(),
-        size: PhysicalSize::new(sz.width, sz.height).into(),
+        position: PhysicalPosition::new(i as i32, i as i32).into(),
+        size: PhysicalSize::new(sz.width.saturating_sub(2 * i), sz.height.saturating_sub(2 * i)).into(),
     }
+}
+
+/// Цвет подложки окна под цвет интерфейса (виден по краям рамки).
+fn window_bg(w: &Window, theme: &str, incognito: bool) -> (u8, u8, u8, u8) {
+    if incognito {
+        return (22, 15, 36, 255);
+    }
+    let dark = match theme {
+        "dark" => true,
+        "light" => false,
+        _ => matches!(w.theme(), tao::window::Theme::Dark),
+    };
+    if dark { (27, 28, 32, 255) } else { (243, 244, 246, 255) }
 }
 
 /// Удаляет временный профиль инкогнито уже после выхода процесса.
@@ -477,7 +529,7 @@ impl App {
     // ----- история -----
 
     fn write_history_all(&self) {
-        if self.incognito {
+        if self.incognito || self.secondary {
             return;
         }
         let mut s = String::new();
@@ -491,7 +543,7 @@ impl App {
     }
 
     fn record_history(&mut self, id: u32) {
-        if self.incognito {
+        if self.incognito || self.secondary {
             return;
         }
         let Some(t) = self.tabs.iter().find(|t| t.id == id) else { return };
@@ -611,7 +663,7 @@ impl App {
             .with_devtools(cfg!(debug_assertions))
             .with_incognito(incognito)
             .with_browser_extensions_enabled(!incognito)
-            .with_additional_browser_args(BROWSER_ARGS)
+            .with_additional_browser_args(&self.args)
             .with_bounds(rect)
             .with_document_title_changed_handler(move |t: String| {
                 let _ = p_title.send_event(UserEvent::Title(id, t));
@@ -800,6 +852,7 @@ impl App {
             "tabs": tabs,
             "active": self.active,
             "panel": self.panel,
+            "maximized": self.window.is_maximized(),
             "incognito": self.incognito,
             "engine": s.engine,
             "adblock": s.adblock,
@@ -812,6 +865,8 @@ impl App {
                 "has_bg": self.bg_data.is_some(),
                 "startup": s.startup,
                 "labels": s.hide_labels,
+                "sleep": s.sleep_minutes,
+                "eco": s.eco,
             },
             "look": { "al": al, "ad": ad, "font": font_stack(&s.font), "fs": font_px(&s.font_size) },
             "filters": { "level": s.adblock_level, "status": self.filters_status },
@@ -840,8 +895,37 @@ impl App {
         }
     }
 
+    /// Отложенная отправка состояния интерфейсу: серия событий склеивается в одну отправку.
+    fn request_state(&self) {
+        if !self.flush_pending.swap(true, Ordering::SeqCst) {
+            let _ = self.flush_tx.send(());
+        }
+    }
+
+    /// Отдельное маленькое окно для расширения (как всплывающее окно у кнопки расширения).
+    fn open_popup(&self, url: &str) {
+        let sf = self.window.scale_factor();
+        let (w, h) = (420.0f64, 620.0f64);
+        let pos = self.window.outer_position().ok().map(|p| {
+            let ow = self.window.outer_size().width as i32;
+            (p.x + ow - (w * sf) as i32 - (24.0 * sf) as i32, p.y + ((TOOLBAR_H + 6.0) * sf) as i32)
+        });
+        if let Ok(exe) = std::env::current_exe() {
+            let mut c = std::process::Command::new(exe);
+            c.args(["--popup", url, "--size", &format!("{w},{h}")]);
+            if let Some((x, y)) = pos {
+                c.args(["--pos", &format!("{x},{y}")]);
+            }
+            let _ = c.spawn();
+        }
+    }
+
+    fn update_window_bg(&self) {
+        self.window.set_background_color(Some(window_bg(&self.window, &self.settings.theme, self.incognito)));
+    }
+
     fn save_session(&self) {
-        if self.incognito {
+        if self.incognito || self.secondary {
             return;
         }
         let real: Vec<&Tab> = self.tabs.iter().filter(|t| t.url.starts_with("http")).collect();
@@ -914,17 +998,19 @@ impl App {
     }
 
     /// Адрес окна расширения (всплывающее окно или страница настроек), если оно есть.
-    fn ext_page(&self, id: &str) -> Option<String> {
+    fn ext_page(&self, id: &str) -> Option<(String, bool)> {
         let dir = self.ext_dir.join(self.ext_map.get(id)?);
         let raw = fs::read_to_string(dir.join("manifest.json")).ok()?;
         let m: serde_json::Value = serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok()?;
-        let path = m["action"]["default_popup"]
+        let popup = m["action"]["default_popup"]
             .as_str()
             .or(m["browser_action"]["default_popup"].as_str())
-            .or(m["page_action"]["default_popup"].as_str())
-            .or(m["options_ui"]["page"].as_str())
-            .or(m["options_page"].as_str())?;
-        Some(format!("chrome-extension://{id}/{}", path.trim_start_matches('/')))
+            .or(m["page_action"]["default_popup"].as_str());
+        let (path, is_popup) = match popup {
+            Some(p) => (p, true),
+            None => (m["options_ui"]["page"].as_str().or(m["options_page"].as_str())?, false),
+        };
+        Some((format!("chrome-extension://{id}/{}", path.trim_start_matches('/')), is_popup))
     }
 
     fn spawn_filters(&self, force: bool) {
@@ -1193,6 +1279,7 @@ impl App {
                     self.settings.font = font;
                     self.settings.font_size = font_size;
                     self.save_settings();
+                    self.update_window_bg();
                     self.refresh_newtabs();
                     self.push_state();
                 }
@@ -1283,7 +1370,8 @@ impl App {
                 });
             }
             Cmd::ExtOpen { id } => match self.ext_page(&id) {
-                Some(u) => self.new_tab(Some(u)),
+                Some((u, true)) => self.open_popup(&u),
+                Some((u, false)) => self.new_tab(Some(u)),
                 None => {
                     let _ = self.proxy.send_event(UserEvent::ExtChanged(
                         "У этого расширения нет окна. Переустановите его, чтобы кнопка «Открыть» заработала".into(),
@@ -1307,6 +1395,52 @@ impl App {
                     self.save_settings();
                     self.push_state();
                 }
+            }
+            Cmd::WinMin => self.window.set_minimized(true),
+            Cmd::WinMax => self.window.set_maximized(!self.window.is_maximized()),
+            Cmd::WinClose => {
+                let _ = self.proxy.send_event(UserEvent::Quit);
+            }
+            Cmd::WinDrag => {
+                let _ = self.window.drag_window();
+            }
+            Cmd::DetachTab { id, x, y } => {
+                if self.tabs.len() > 1 {
+                    let url = self.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone()).unwrap_or_default();
+                    if let Ok(exe) = std::env::current_exe() {
+                        let mut c = std::process::Command::new(exe);
+                        c.arg("--secondary");
+                        if self.incognito {
+                            c.arg("--incognito");
+                        }
+                        if !url.is_empty() {
+                            c.args(["--url", &url]);
+                        }
+                        c.args(["--pos", &format!("{},{}", (x - 240).max(0), (y - 20).max(0))]);
+                        if c.spawn().is_ok() {
+                            self.tabs.retain(|t| t.id != id);
+                            if self.active == id {
+                                let last = self.tabs.last().map(|t| t.id).unwrap_or(0);
+                                self.activate(last);
+                            } else {
+                                self.push_state();
+                            }
+                        }
+                    }
+                }
+            }
+            Cmd::SetSleep { minutes } => {
+                if matches!(minutes, 0 | 3 | 5 | 10) {
+                    self.settings.sleep_minutes = minutes;
+                    self.save_settings();
+                    self.push_state();
+                }
+            }
+            Cmd::SetEco { on } => {
+                self.settings.eco = on;
+                self.save_settings();
+                self.push_state();
+                self.toast("Эконом-режим применится после перезапуска браузера");
             }
             Cmd::SetLabels { on } => {
                 self.settings.hide_labels = on;
@@ -1354,14 +1488,14 @@ impl App {
                             last.t = t;
                         }
                     }
-                    self.push_state();
+                    self.request_state();
                 }
             }
             UserEvent::Url(id, u) => {
                 let u = if u.starts_with("about:") || u.starts_with("data:") { String::new() } else { u };
                 if let Some(tab) = self.tabs.iter_mut().find(|x| x.id == id && x.webview.is_some()) {
                     tab.url = u;
-                    self.push_state();
+                    self.request_state();
                 }
             }
             UserEvent::Loading(id, on) => {
@@ -1383,8 +1517,13 @@ impl App {
                         }
                     });
                 }
+                self.request_state();
+            }
+            UserEvent::Flush => {
+                self.flush_pending.store(false, Ordering::SeqCst);
                 self.push_state();
             }
+            UserEvent::Quit => {}
             UserEvent::Navigate(id, u) => {
                 if let Some(wv) = self.tabs.iter().find(|x| x.id == id).and_then(|t| t.webview.as_ref()) {
                     let _ = wv.load_url(&u);
@@ -1400,11 +1539,13 @@ impl App {
             UserEvent::Tick => {
                 let active = self.active;
                 let mut changed = false;
+                let sleep_after = Duration::from_secs(self.settings.sleep_minutes as u64 * 60);
                 for t in self.tabs.iter_mut() {
-                    if t.id != active
+                    if self.settings.sleep_minutes > 0
+                        && t.id != active
                         && t.webview.is_some()
                         && !t.url.is_empty()
-                        && t.last_active.elapsed() > SLEEP_AFTER
+                        && t.last_active.elapsed() > sleep_after
                         && !keeps_awake(&t.url)
                     {
                         t.webview = None; // освобождаем память процессов вкладки
@@ -1540,8 +1681,97 @@ impl App {
     }
 }
 
+#[derive(Default)]
+struct Cli {
+    incognito: bool,
+    secondary: bool,
+    url: Option<String>,
+    pos: Option<(i32, i32)>,
+    popup: Option<String>,
+    size: Option<(f64, f64)>,
+}
+
+fn parse_pair<T: std::str::FromStr>(s: &str) -> Option<(T, T)> {
+    let (a, b) = s.split_once(',')?;
+    Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
+}
+
+fn parse_cli() -> Cli {
+    let a: Vec<String> = std::env::args().skip(1).collect();
+    let mut c = Cli::default();
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--incognito" => c.incognito = true,
+            "--secondary" => c.secondary = true,
+            "--url" => {
+                i += 1;
+                c.url = a.get(i).cloned();
+            }
+            "--popup" => {
+                i += 1;
+                c.popup = a.get(i).cloned();
+            }
+            "--pos" => {
+                i += 1;
+                c.pos = a.get(i).and_then(|v| parse_pair::<i32>(v));
+            }
+            "--size" => {
+                i += 1;
+                c.size = a.get(i).and_then(|v| parse_pair::<f64>(v));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    c
+}
+
+fn safe_url(u: &str) -> bool {
+    u.starts_with("https://") || u.starts_with("http://") || u.starts_with("chrome-extension://")
+}
+
+/// Режим «всплывающего окна» расширения: маленькое окно без вкладок, закрывается при потере фокуса.
+fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: String, profile: PathBuf) {
+    let event_loop = EventLoopBuilder::<()>::new().build();
+    let icon = tao::window::Icon::from_rgba(ICON_RGBA.to_vec(), 64, 64).ok();
+    let mut wb = WindowBuilder::new()
+        .with_window_icon(icon)
+        .with_title("Lumen — расширение")
+        .with_inner_size(tao::dpi::LogicalSize::new(size.0, size.1))
+        .with_always_on_top(true);
+    if let Some((x, y)) = pos {
+        wb = wb.with_position(tao::dpi::PhysicalPosition::new(x, y));
+    }
+    let window = wb.build(&event_loop).expect("не удалось создать окно");
+    let mut ctx = WebContext::new(Some(profile));
+    let webview = WebViewBuilder::with_web_context(&mut ctx)
+        .with_devtools(false)
+        .with_incognito(false)
+        .with_browser_extensions_enabled(true)
+        .with_additional_browser_args(&args)
+        .with_url(&url)
+        .build(&window)
+        .expect("не удалось создать WebView2");
+    let mut was_focused = false;
+    event_loop.run(move |event, _, flow| {
+        *flow = ControlFlow::Wait;
+        let _ = &webview;
+        if let Event::WindowEvent { event: we, .. } = event {
+            match we {
+                WindowEvent::CloseRequested => *flow = ControlFlow::Exit,
+                WindowEvent::Focused(true) => was_focused = true,
+                WindowEvent::Focused(false) if was_focused => *flow = ControlFlow::Exit,
+                _ => {}
+            }
+        }
+    });
+}
+
 fn main() {
-    let incognito = std::env::args().any(|a| a == "--incognito");
+    let cli = parse_cli();
+    let incognito = cli.incognito;
+    let secondary = cli.secondary;
 
     // профиль и настройки: %LOCALAPPDATA%\Lumen
     let dir = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("Lumen");
@@ -1550,6 +1780,18 @@ fn main() {
     let ext_dir = dir.join("extensions");
     let _ = fs::create_dir_all(&lists_dir);
     let _ = fs::create_dir_all(&ext_dir);
+
+    let settings_path = dir.join("settings.json");
+    let settings: Settings = fs::read_to_string(&settings_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let args = browser_args(settings.eco);
+
+    if let Some(url) = cli.popup.clone().filter(|u| safe_url(u)) {
+        run_popup(url, cli.size.unwrap_or((420.0, 620.0)), cli.pos, args, dir.join("profile"));
+        return;
+    }
 
     let profile_dir = if incognito {
         std::env::temp_dir().join(format!("Lumen-incognito-{}", std::process::id()))
@@ -1560,11 +1802,6 @@ fn main() {
     let links_path = dir.join("links.json");
     let session_path = dir.join("session.json");
     let ext_map_path = dir.join("ext_map.json");
-    let settings_path = dir.join("settings.json");
-    let settings: Settings = fs::read_to_string(&settings_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
 
     // история
     let history_path = dir.join("history.jsonl");
@@ -1584,7 +1821,7 @@ fn main() {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    let session: Session = if incognito {
+    let session: Session = if incognito || secondary {
         Session::default()
     } else {
         fs::read_to_string(&session_path)
@@ -1596,7 +1833,7 @@ fn main() {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    let restore = !incognito && settings.startup == "restore" && !session.tabs.is_empty();
+    let restore = !incognito && !secondary && settings.startup == "restore" && !session.tabs.is_empty();
 
     // своя фотография для главного экрана
     let bg_path = dir.join("background.txt");
@@ -1618,14 +1855,34 @@ fn main() {
         });
     }
 
+    // склейка частых обновлений интерфейса
+    let (flush_tx, flush_rx) = mpsc::channel::<()>();
+    {
+        let p = proxy.clone();
+        std::thread::spawn(move || {
+            while flush_rx.recv().is_ok() {
+                std::thread::sleep(Duration::from_millis(35));
+                while flush_rx.try_recv().is_ok() {}
+                if p.send_event(UserEvent::Flush).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
     let icon = tao::window::Icon::from_rgba(ICON_RGBA.to_vec(), 64, 64).ok();
-    let window = WindowBuilder::new()
+    let mut wb = WindowBuilder::new()
         .with_window_icon(icon)
+        .with_decorations(false) // вкладки и кнопки окна рисует сам браузер
         .with_title(if incognito { "Lumen — Инкогнито" } else { "Lumen" })
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
-        .with_min_inner_size(tao::dpi::LogicalSize::new(640.0, 400.0))
-        .build(&event_loop)
-        .expect("не удалось создать окно");
+        .with_min_inner_size(tao::dpi::LogicalSize::new(640.0, 400.0));
+    if let Some((x, y)) = cli.pos {
+        wb = wb.with_position(tao::dpi::PhysicalPosition::new(x, y));
+    }
+    let window = wb.build(&event_loop).expect("не удалось создать окно");
+    window.set_undecorated_shadow(true);
+    window.set_background_color(Some(window_bg(&window, &settings.theme, incognito)));
 
     let mut ctx = WebContext::new(Some(profile_dir.clone()));
 
@@ -1635,7 +1892,7 @@ fn main() {
         .with_devtools(cfg!(debug_assertions))
         .with_incognito(incognito)
         .with_browser_extensions_enabled(!incognito) // у всех WebView одного профиля параметры должны совпадать
-        .with_additional_browser_args(BROWSER_ARGS) // у всех WebView одного профиля аргументы должны совпадать
+        .with_additional_browser_args(&args) // у всех WebView одного профиля аргументы должны совпадать
         .with_html(UI_HTML)
         .with_bounds(ui_rect(&window))
         .with_on_page_load_handler(move |ev: PageLoadEvent, _: String| {
@@ -1683,8 +1940,15 @@ fn main() {
         last_session: RefCell::new(String::new()),
         ext_map,
         ext_map_path,
+        secondary,
+        args,
+        flush_tx,
+        flush_pending: Arc::new(AtomicBool::new(false)),
     };
-    if restore {
+    let first_url = cli.url.filter(|u| safe_url(u));
+    if let Some(u) = first_url {
+        app.new_tab(Some(u));
+    } else if restore {
         app.restore_session(session);
     } else {
         app.new_tab(None);
@@ -1694,7 +1958,7 @@ fn main() {
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } | Event::UserEvent(UserEvent::Quit) => {
                 if app.incognito {
                     app.tabs.clear();
                     schedule_cleanup(&app.profile_dir);
@@ -1703,7 +1967,8 @@ fn main() {
             }
             Event::WindowEvent { event: WindowEvent::Resized(_), .. }
             | Event::WindowEvent { event: WindowEvent::ScaleFactorChanged { .. }, .. } => {
-                app.layout()
+                app.layout();
+                app.request_state();
             }
             Event::UserEvent(ev) => app.handle(ev),
             _ => {}

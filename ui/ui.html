@@ -43,7 +43,13 @@
   .btn:active, .x:active { transform:scale(.88); }
   #plus { margin-bottom:2px; }
   #logo { width:22px; height:22px; margin:0 8px 6px 4px; align-self:flex-end; border-radius:6px; flex:none; }
-  .grow { flex:1; min-width:8px; }
+  .grow { flex:1; min-width:24px; align-self:stretch; }
+  .wc { align-self:flex-start; display:flex; height:36px; margin:-4px -6px 0 6px; }
+  .wc button { width:46px; height:36px; display:grid; place-items:center; border:0; background:none; color:var(--fg); cursor:default; transition:background-color .12s; }
+  .wc button:hover { background:var(--hover); }
+  .wc .wx:hover { background:#e81123; color:#fff; }
+  .tab.drag { position:relative; z-index:30; transition:none; animation:none; opacity:.92; box-shadow:0 8px 22px rgba(0,0,0,.35); background:var(--bar); }
+  .tab.drag.detach { opacity:.6; }
   .tb { width:28px; height:28px; margin-bottom:2px; font-size:15px; }
   #toast { position:fixed; left:50%; top:46px; transform:translate(-50%,-12px); padding:9px 18px; border-radius:10px; background:var(--fg); color:var(--bg);
     opacity:0; pointer-events:none; z-index:20; transition:opacity .25s, transform .25s var(--ease); font-size:.95em; }
@@ -155,7 +161,7 @@
 </head>
 <body>
   <div id="tabs">
-    <img id="logo" alt="" src="data:image/png;base64,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">
+    <img id="logo" alt="" src="data:image/png;base64,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">
     <button class="btn" id="plus" title="Новая вкладка (Ctrl+T)">+</button>
     <div class="grow"></div>
     <div id="badge" title="История, куки и кэш не сохраняются">🕶 Инкогнито</div>
@@ -165,6 +171,11 @@
     <button class="btn tb" id="inc" title="Окно инкогнито (Ctrl+Shift+N)">🕶</button>
     <button class="btn tb" id="shield" title="Блокировка рекламы">🛡</button>
     <button class="btn tb" id="gear" title="Настройки (Ctrl+,)">⚙</button>
+    <div class="wc">
+      <button id="wmin" title="Свернуть"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor"/></svg></button>
+      <button id="wmax" title="Развернуть"><svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button>
+      <button id="wclose" class="wx" title="Закрыть"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></button>
+    </div>
   </div>
   <div id="nav">
     <button class="btn" id="back" title="Назад (Alt+←)">←</button>
@@ -267,6 +278,14 @@
         <div class="hint">Фото уменьшается и хранится только на этом компьютере. Фон показывается на стартовой странице новой вкладки.</div>
       </div>
 
+      <div class="grp"><h3>Память и скорость</h3>
+        <div class="hint" style="margin-top:0;margin-bottom:8px">Выгружать фоновые вкладки из памяти через:</div>
+        <div class="segx" data-x="sleep"><button data-v="3">3 мин</button><button data-v="5">5 мин</button><button data-v="10">10 мин</button><button data-v="0">Никогда</button></div>
+        <div class="hint" style="margin-top:14px;margin-bottom:8px">Эконом-режим движка (нужен перезапуск):</div>
+        <div class="segx" data-x="eco"><button data-v="off">Выключен</button><button data-v="on">Включён</button></div>
+        <div class="hint">Эконом-режим: облегчённый режим Chromium, не хранит страницы для кнопки «Назад», не больше трёх процессов. Памяти уходит меньше, но возможны небольшие задержки на тяжёлых сайтах.</div>
+      </div>
+
       <div class="grp"><h3>При запуске</h3>
         <div class="segx" data-x="startup"><button data-v="restore">Вернуть открытые вкладки</button><button data-v="new">Новая вкладка</button></div>
         <div class="hint">Вернуть вкладки: откроется то, что было в прошлый раз (загружается только активная вкладка, остальные ждут своего часа и не тратят память).</div>
@@ -303,6 +322,7 @@ const $ = (id) => document.getElementById(id);
 let state = { tabs: [], active: 0, panel: '', set: {} };
 let hist = [];
 let lastPanel = '';
+let justDragged = false;
 const els = new Map(); // id -> элемент вкладки (обновляем, а не пересоздаём — анимации не сбрасываются)
 
 const ACC = { indigo:'#4f46e5', blue:'#2563eb', green:'#16a34a', orange:'#ea580c', pink:'#db2777', red:'#dc2626' };
@@ -320,7 +340,35 @@ function makeTab(t) {
   const label = document.createElement('span');
   const x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
   x.onclick = (e) => { e.stopPropagation(); send({ cmd: 'close_tab', id: t.id }); };
-  d.onclick = () => send({ cmd: 'switch', id: t.id });
+  d.onclick = () => { if (!justDragged) send({ cmd: 'switch', id: t.id }); };
+  d.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('.x')) return;
+    const sx = e.clientX, sy = e.clientY;
+    let moved = false;
+    d.setPointerCapture(e.pointerId);
+    const move = (ev) => {
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      if (!moved && Math.hypot(dx, dy) < 8) return;
+      moved = true;
+      d.classList.add('drag');
+      d.style.transform = `translate(${dx}px,${dy}px)`;
+      d.classList.toggle('detach', Math.abs(dy) > 46);
+    };
+    const up = (ev) => {
+      d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up);
+      try { d.releasePointerCapture(e.pointerId); } catch (_) {}
+      const far = Math.abs(ev.clientY - sy) > 46;
+      d.classList.remove('drag', 'detach'); d.style.transform = '';
+      if (moved) {
+        justDragged = true; setTimeout(() => { justDragged = false; }, 50);
+        if (far && state.tabs.length > 1) {
+          const k = window.devicePixelRatio || 1;
+          send({ cmd: 'detach_tab', id: t.id, x: Math.round(ev.screenX * k), y: Math.round(ev.screenY * k) });
+        }
+      }
+    };
+    d.addEventListener('pointermove', move); d.addEventListener('pointerup', up);
+  });
   d.onauxclick = (e) => { if (e.button === 1) send({ cmd: 'close_tab', id: t.id }); };
   d.append(sp, label, x);
   return d;
@@ -456,6 +504,12 @@ window.onState = (s) => {
   $('fstat').textContent = s.filters.level === 'strong' ? s.filters.status : 'Базовый режим: встроенный список доменов, без загрузки фильтров.';
   $('updf').hidden = s.filters.level !== 'strong';
   document.querySelectorAll('.segx[data-x="startup"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set.startup));
+  document.querySelectorAll('.segx[data-x="sleep"] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === s.set.sleep));
+  document.querySelectorAll('.segx[data-x="eco"] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'on') === !!s.set.eco));
+  $('wmax').innerHTML = s.maximized
+    ? '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y="2.5" width="7" height="7" fill="none" stroke="currentColor"/><path d="M2.5 2.5v-2h7v7h-2" fill="none" stroke="currentColor"/></svg>'
+    : '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg>';
+  $('wmax').title = s.maximized ? 'Восстановить' : 'Развернуть';
   document.querySelectorAll('.segx[data-x="labels"] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'on') === !!s.set.labels));
   $('bstat').textContent = 'Заблокировано запросов с запуска: ' + s.block.count;
   if (s.panel === 'settings') $('blog').textContent = s.block.recent.length ? s.block.recent.join('\n') : 'Пока ничего (откройте сайт и вернитесь)';
@@ -543,6 +597,14 @@ document.querySelectorAll('.segx[data-x="source"] button').forEach((b) => b.oncl
 document.querySelectorAll('.segx[data-x="level"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_adblock_level', level: b.dataset.v }));
 $('updf').onclick = () => send({ cmd: 'update_filters' });
 $('star').onclick = () => send({ cmd: 'add_current_link' });
+$('wmin').onclick = () => send({ cmd: 'win_min' });
+$('wmax').onclick = () => send({ cmd: 'win_max' });
+$('wclose').onclick = () => send({ cmd: 'win_close' });
+const dragZone = (t) => t.id === 'tabs' || t.id === 'logo' || t.classList.contains('grow') || t.id === 'badge';
+$('tabs').addEventListener('mousedown', (e) => { if (e.button === 0 && dragZone(e.target) && e.detail === 1) send({ cmd: 'win_drag' }); });
+$('tabs').addEventListener('dblclick', (e) => { if (dragZone(e.target)) send({ cmd: 'win_max' }); });
+document.querySelectorAll('.segx[data-x="sleep"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_sleep', minutes: +b.dataset.v }));
+document.querySelectorAll('.segx[data-x="eco"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_eco', on: b.dataset.v === 'on' }));
 document.querySelectorAll('.segx[data-x="startup"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_startup', mode: b.dataset.v }));
 document.querySelectorAll('.segx[data-x="labels"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_labels', on: b.dataset.v === 'on' }));
 $('extgo').onclick = () => { const v = $('extin').value.trim(); if (v) send({ cmd: 'ext_install', input: v }); };
