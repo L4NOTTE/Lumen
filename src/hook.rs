@@ -77,6 +77,7 @@ pub fn install_blocker(
     enabled: Arc<AtomicBool>,
     page: Rc<RefCell<String>>,
     stats: Arc<Stats>,
+    basic: Rc<crate::blocker::Blocker>,
 ) -> windows_core::Result<()> {
     unsafe {
         let core = wv.controller().CoreWebView2()?;
@@ -103,8 +104,6 @@ pub fn install_blocker(
                 if !enabled.load(Ordering::Relaxed) {
                     return Ok(());
                 }
-                let guard = filters.borrow();
-                let Some(f) = guard.as_ref() else { return Ok(()) };
 
                 let req = args.Request()?;
                 let url = {
@@ -115,6 +114,14 @@ pub fn install_blocker(
                 if !(url.starts_with("http://") || url.starts_with("https://")) {
                     return Ok(());
                 }
+                if basic.is_blocked(&url) {
+                    stats.add(&url);
+                    let response=env.CreateWebResourceResponse(None,403,&HSTRING::from("Blocked"),&HSTRING::from("Content-Type: text/plain"))?;
+                    args.SetResponse(&response)?;
+                    return Ok(());
+                }
+                let guard = filters.borrow();
+                let Some(f) = guard.as_ref() else { return Ok(()) };
                 let page_url = page.borrow().clone();
                 if page_url.is_empty() {
                     return Ok(());

@@ -181,7 +181,12 @@ button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outl
 .wc button{overflow:hidden}.wc button:focus-visible{box-shadow:inset 0 0 0 2px var(--acc);outline:0}
 .resize{position:fixed;z-index:100;touch-action:none;background:transparent}.resize.n{top:0;left:5px;right:5px;height:3px;cursor:n-resize}.resize.ne{right:0;top:0;width:5px;height:5px;cursor:ne-resize}.resize.nw{left:0;top:0;width:5px;height:5px;cursor:nw-resize}.resize.e{right:0;top:5px;height:75px;width:3px;cursor:e-resize}.resize.w{left:0;top:5px;height:75px;width:3px;cursor:w-resize}body.maximized .resize{display:none}
 </style>
-</head>
+<style>button,button:hover,button:active,button:focus,button:focus-visible{transform:none!important;transition:none!important;box-shadow:none!important;outline:none!important}.wc{overflow:hidden}.wc button{border-radius:0!important}.btn:active,.x:active,.chip:active{transform:none!important}</style><style>
+.btn:hover,.x:hover,.wc button:hover,.wc .wx:hover{background:transparent!important}
+.wc .wx:hover{color:var(--fg)!important}.chip:hover{background:var(--bg);border-color:var(--line)}
+.seg button:hover,.segx button:hover{background:transparent}
+.seg button.on:hover,.segx button.on:hover{background:var(--acc);color:#fff}
+</style></head>
 <body>
   <div class="resize n" data-resize="n"></div><div class="resize ne" data-resize="ne"></div><div class="resize nw" data-resize="nw"></div><div class="resize e" data-resize="e"></div><div class="resize w" data-resize="w"></div>
   <div id="tabs">
@@ -189,7 +194,6 @@ button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outl
     <button class="btn" id="plus" title="Новая вкладка (Ctrl+T)">+</button>
     <div class="grow"></div>
     <div id="badge" title="История, куки и кэш не сохраняются">🕶 Инкогнито</div>
-    <button class="btn tb" id="music" title="Распознать музыку (Ctrl+M)">🎵</button>
     <button class="btn tb" id="hist" title="История (Ctrl+H)">🕒</button>
     <button class="btn tb" id="extbtn" title="Расширения">🧩</button>
     <button class="btn tb" id="inc" title="Окно инкогнито (Ctrl+Shift+N)">🕶</button>
@@ -346,6 +350,19 @@ button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outl
 <script>
 const send = (o) => window.ipc.postMessage(JSON.stringify(o));
 const $ = (id) => document.getElementById(id);
+// Native title bubbles are painted outside the toolbar WebView, causing the
+// stray bordered rectangle. Keep accessible labels without native bubbles.
+function removeNativeHints(root) {
+  const elements = root.nodeType === 1 ? [root, ...root.querySelectorAll('[title]')] : [...root.querySelectorAll('[title]')];
+  for (const el of elements) {
+    const text = el.getAttribute('title');
+    if (text === null) continue;
+    if (text) { el.setAttribute('aria-label', text); el.setAttribute('data-hint', text); }
+    el.removeAttribute('title');
+  }
+}
+removeNativeHints(document);
+new MutationObserver(records => { for (const r of records) { if (r.type === 'attributes') removeNativeHints(r.target); else r.addedNodes.forEach(n => { if (n.nodeType === 1) removeNativeHints(n); }); } }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['title']});
 let state = { tabs: [], active: 0, panel: '', set: {} };
 let lastFrameTheme = null;
 const frameMedia = matchMedia('(prefers-color-scheme: dark)');
@@ -538,7 +555,6 @@ window.onState = (s) => {
   $('hist').classList.toggle('on', s.panel === 'history');
   $('gear').classList.toggle('on', s.panel === 'settings');
   $('extbtn').classList.toggle('on', s.panel === 'ext');
-  $('music').classList.toggle('on', s.panel === 'music');
   if (s.panel && s.panel !== lastPanel) { $('panel').style.animation = 'none'; $('panel').offsetHeight; $('panel').style.animation = ''; }
   lastPanel = s.panel;
 
@@ -630,7 +646,6 @@ $('adb').onclick = () => send({ cmd: 'toggle_adblock' });
 const togglePanel = (name) => send(state.panel === name ? { cmd: 'close_panel' } : { cmd: 'open_panel', name });
 $('hist').onclick = () => togglePanel('history');
 $('extbtn').onclick = () => togglePanel('ext');
-$('music').onclick = () => send({ cmd: 'recognize' });
 $('mgo').onclick = () => send({ cmd: 'recognize' });
 $('mopen').onclick = () => { if (song && song.link) send({ cmd: 'open_url', url: song.link }); };
 $('audlink').onclick = () => send({ cmd: 'open_url', url: 'https://dashboard.audd.io/' });
@@ -683,7 +698,6 @@ addEventListener('keydown', (e) => {
   else if (e.ctrlKey && k === 'w') { e.preventDefault(); send({ cmd: 'close_tab', id: state.active }); }
   else if (e.ctrlKey && k === 'l') { e.preventDefault(); $('url').focus(); }
   else if (e.ctrlKey && k === 'h') { e.preventDefault(); togglePanel('history'); }
-  else if (e.ctrlKey && k === 'm') { e.preventDefault(); send({ cmd: 'recognize' }); }
   else if (e.ctrlKey && k === 'd') { e.preventDefault(); send({ cmd: 'add_current_link' }); }
   else if (e.ctrlKey && e.key === ',') { e.preventDefault(); togglePanel('settings'); }
   else if (e.key === 'F5') { e.preventDefault(); send({ cmd: 'reload' }); }

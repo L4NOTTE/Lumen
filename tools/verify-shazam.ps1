@@ -29,6 +29,6 @@ Start-Sleep -Milliseconds 1000
 $targets=Invoke-RestMethod "http://127.0.0.1:$port/json/list"
 $shazam=$targets|Where-Object {$_.type -eq 'page' -and $_.url.StartsWith('chrome-extension://mmioliijnhnoblpgimnlajmefafdfilb/')}|Select-Object -First 1
 if(-not $shazam){throw 'Shazam tab missing'}
-$probe=Invoke-Cdp $shazam 'Runtime.evaluate' @{expression="JSON.stringify({id:chrome.runtime.id,adapter:chrome.tabCapture.capture.toString().includes('pending=callback'),displayCapture:typeof navigator.mediaDevices?.getDisplayMedia,secure:isSecureContext,loaded:document.body.innerText.length>0})";returnByValue=$true}
+$probe=Invoke-Cdp $shazam 'Runtime.evaluate' @{expression="JSON.stringify({id:chrome.runtime.id,adapter:chrome.tabCapture.capture.toString().includes('capture_start'),nativeBridge:typeof window.ipc?.postMessage,secure:isSecureContext,loaded:document.body.innerText.length>0})";returnByValue=$true}
 $result=$probe.result.result.value|ConvertFrom-Json;$result|ConvertTo-Json
-if(-not $result.adapter -or $result.displayCapture -ne 'function'){throw 'Capture adapter unavailable in real extension context'}
+if(-not $result.adapter -or $result.nativeBridge -ne 'function'){throw 'Capture adapter unavailable in real extension context'}

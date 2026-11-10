@@ -3,7 +3,7 @@
 ; Результат: installer\Output\LumenSetup.exe
 
 #define AppName "Lumen"
-#define AppVersion "0.3.0"
+#define AppVersion "0.3.6"
 #define AppExe "lumen.exe"
 
 [Setup]

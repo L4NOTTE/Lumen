@@ -1,31 +1,29 @@
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
-const source = readFileSync(new URL('../src/shazam-capture.js', import.meta.url), 'utf8');
-function environment({audio=true,host='mmioliijnhnoblpgimnlajmefafdfilb'}={}) {
-  const elements=[];let requests=0,connections=0,videoStops=0,audioStops=0;
-  class Element {constructor(tag){this.tag=tag;this.children=[];this.style={};elements.push(this);}append(...n){this.children.push(...n)}prepend(...n){this.children.unshift(...n)}replaceChildren(){this.children=[]}remove(){this.removed=true}}
-  class AudioDestinationNode {}
-  class AudioContext {createMediaStreamSource(){return {connect(){connections++}}}}
-  const audioTrack={stop(){audioStops++},addEventListener(){}};
-  const videoTrack={stop(){videoStops++},addEventListener(){}};
-  class MediaStream {constructor(tracks){this.tracks=tracks}getAudioTracks(){return this.tracks}}
-  const original=()=>{};
-  const context={location:{protocol:'chrome-extension:',hostname:host},AudioDestinationNode,AudioContext,MediaStream,
-    chrome:{tabCapture:{capture:original}},document:{body:new Element('body'),createElement:t=>new Element(t)},
-    navigator:{mediaDevices:{async getDisplayMedia(){requests++;return {getAudioTracks:()=>audio?[audioTrack]:[],getVideoTracks:()=>[videoTrack],getTracks:()=>audio?[audioTrack,videoTrack]:[videoTrack]}}}},
-    addEventListener(){},WeakSet};
-  vm.runInNewContext(source,context);
-  return {context,original,button:()=>elements.filter(e=>e.tag==='button').at(-1),counts:()=>({requests,connections,videoStops,audioStops})};
+const source=readFileSync(new URL('../src/shazam-capture.js',import.meta.url),'utf8');
+const ui=readFileSync(new URL('../ui/ui.html',import.meta.url),'utf8');
+const ids=new Set([...ui.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]));
+for(const match of ui.matchAll(/\$\('([^']+)'\)/g))assert.ok(ids.has(match[1]),'UI references removed element: '+match[1]);
+const commands=[],starts=[];let connections=0,closed=0;
+const track={stop(){},};
+class AudioDestinationNode{}
+class AudioContext{
+ constructor(){this.currentTime=0;}
+ resume(){return Promise.resolve()}
+ close(){closed++;return Promise.resolve()}
+ createMediaStreamSource(){return {connect(){connections++}}}
+ createMediaStreamDestination(){return {stream:{getAudioTracks:()=>[track]}}}
+ createBuffer(channels,length,rate){return {duration:length/rate,copyToChannel(data){assert.equal(data.length,length)}}}
+ createBufferSource(){return {connect(){},disconnect(){},start(t){starts.push(t)}}}
 }
-const test=environment();let captured;
-test.context.chrome.tabCapture.capture({audio:true},stream=>{captured=stream});
-assert.equal(test.counts().requests,0,'must wait for an explicit click');
-await test.button().onclick();assert.ok(captured);assert.equal(test.counts().requests,1);
-const sourceNode=new test.context.AudioContext().createMediaStreamSource(captured);
-sourceNode.connect(new test.context.AudioDestinationNode());assert.equal(test.counts().connections,0,'must suppress system-audio feedback');
-sourceNode.connect({});assert.equal(test.counts().connections,1,'recorder must still receive audio');
-captured.getAudioTracks()[0].stop();assert.ok(test.counts().videoStops>=1,'stop screen capture together with audio');
-const silent=environment({audio:false});let callback=false;silent.context.chrome.tabCapture.capture({},()=>callback=true);await silent.button().onclick();assert.equal(callback,false);assert.ok(silent.counts().videoStops>=1);
-const other=environment({host:'other-extension'});assert.equal(other.context.chrome.tabCapture.capture,other.original);
-console.log('Shazam adapter: consent, audio stream, feedback suppression, cleanup, no-audio and origin isolation OK');
+const context={location:{protocol:'chrome-extension:',hostname:'mmioliijnhnoblpgimnlajmefafdfilb'},ipc:{postMessage:m=>commands.push(JSON.parse(m))},AudioContext,AudioDestinationNode,chrome:{tabCapture:{}},addEventListener(){},WeakSet,atob,Uint8Array,Float32Array};context.window=context;
+vm.runInNewContext(source,context);
+assert.equal(commands.length,0,'no capture before recognition click');
+let stream;context.chrome.tabCapture.capture({audio:true},s=>stream=s);
+assert.ok(stream);assert.equal(commands[0].cmd,'capture_start');
+const pcm=new Float32Array([0.25,-0.25,0.1,-0.1]);context.__lumenAudio(48000,Buffer.from(pcm.buffer).toString('base64'));assert.equal(starts.length,1);
+const node=new context.AudioContext().createMediaStreamSource(stream);node.connect(new AudioDestinationNode());assert.equal(connections,0);node.connect({});assert.equal(connections,1);
+stream.getAudioTracks()[0].stop();assert.equal(commands.at(-1).cmd,'capture_stop');assert.equal(closed,1);
+context.__lumenAudio(48000,Buffer.from(pcm.buffer).toString('base64'));assert.equal(starts.length,1,'ignore packets after stop');
+console.log('Native audio bridge: click gate, PCM scheduling, feedback suppression and cleanup OK');

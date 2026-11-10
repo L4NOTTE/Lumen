@@ -9,6 +9,7 @@ openx.net amazon-adsystem.com scorecardresearch.com quantserve.com moatads.com
 smartadserver.com casalemedia.com teads.tv advertising.com ads.yahoo.com
 bat.bing.com hotjar.com mixpanel.com
 mc.yandex.ru an.yandex.ru yandexadexchange.net adfox.ru adriver.ru begun.ru
+yabs.yandex.ru an.yandex.com an.yandex.kz an.yandex.by ads.adfox.ru
 ad.mail.ru tns-counter.ru mediametrics.ru ads.vk.com top-fwz1.mail.ru
 ";
 
@@ -106,5 +107,18 @@ fn parse_line(l: &str, hosts: &mut HashSet<String>, css: &mut String) {
         if (ip == "0.0.0.0" || ip == "127.0.0.1") && h != "localhost" {
             hosts.insert(h.to_lowercase());
         }
+    }
+}
+
+#[cfg(test)]
+mod yandex_tests {
+    #[test]
+    fn ads_are_blocked_without_blocking_weather_or_static_assets() {
+        let blocker=super::Blocker::load(std::path::Path::new("__no_custom_filters__"));
+        assert!(blocker.is_blocked("https://yabs.yandex.ru/count/example"));
+        assert!(blocker.is_blocked("https://an.yandex.ru/meta/example"));
+        assert!(!blocker.is_blocked("https://yandex.ru/pogoda/"));
+        assert!(!blocker.is_blocked("https://yastatic.net/weather/icon.svg"));
+        assert!(!blocker.is_blocked("https://yabs.yandex.ru.example.com/"));
     }
 }

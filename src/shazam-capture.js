@@ -1,43 +1,31 @@
-// WebView2 does not provide Chrome's tabCapture/action invocation context.
-// Only the official Shazam popup gets this explicit-consent display-audio adapter.
-(() => {
-  if (location.protocol !== 'chrome-extension:' || location.hostname !== 'mmioliijnhnoblpgimnlajmefafdfilb') return;
-  const captured = new WeakSet();
-  const create = AudioContext.prototype.createMediaStreamSource;
-  AudioContext.prototype.createMediaStreamSource = function(stream) {
-    const node = create.call(this,stream);
-    if(captured.has(stream)) {
-      const connect=node.connect;
-      // tabCapture normally mutes the original tab; display audio does not.
-      // Do not route captured system audio back to the speakers (feedback).
-      node.connect=function(destination,...args){if(destination instanceof AudioDestinationNode)return destination;return connect.call(this,destination,...args);};
-    }
-    return node;
-  };
-  let pending=null,banner=null;
-  function message(text) {
-    if(!document.body){addEventListener('DOMContentLoaded',()=>message(text),{once:true});return;}
-    if(!banner){banner=document.createElement('div');banner.style.cssText='position:fixed;z-index:2147483647;top:0;left:0;right:0;padding:12px;background:#202337;color:#f2f4ff;font:12px/1.5 Segoe UI,sans-serif;border-bottom:1px solid #687dff';document.body.prepend(banner);document.body.style.paddingTop='104px';}
-    banner.replaceChildren();const label=document.createElement('div');label.textContent=text;banner.append(label);
-    const button=document.createElement('button');button.textContent='Выбрать источник звука';button.style.cssText='margin-top:6px;padding:6px 12px;border:0;border-radius:7px;background:#8b8dff;color:#141628;cursor:pointer';button.onclick=choose;banner.append(button);
-  }
-  async function choose(){
-    if(!pending){message('Сначала нажмите кнопку распознавания Shazam, затем выберите источник звука.');return;}
-    try {
-      if(!navigator.mediaDevices?.getDisplayMedia)throw new Error('Захват экрана недоступен в этой версии WebView2.');
-      const display=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true,systemAudio:'include'});
-      const audio=display.getAudioTracks();
-      if(!audio.length){display.getTracks().forEach(t=>t.stop());throw new Error('Источник не передал звук. Выберите экран и включите передачу системного звука в диалоге.');}
-      const stream=new MediaStream(audio);captured.add(stream);
-      let stopped=false;const stop=()=>{if(stopped)return;stopped=true;display.getTracks().forEach(t=>t.stop());};
-      for(const track of audio){const original=track.stop.bind(track);track.stop=()=>{original();stop();};track.addEventListener('ended',stop,{once:true});}
-      for(const track of display.getVideoTracks())track.addEventListener('ended',stop,{once:true});
-      addEventListener('pagehide',stop,{once:true});
-      if(banner)banner.remove();banner=null;document.body.style.paddingTop='';
-      const callback=pending;pending=null;callback(stream);
-    } catch(error) { message(error.name==='NotAllowedError'?'Выбор отменён или доступ не разрешён. Можно повторить выбор источника.':String(error.message||error)); }
-  }
-  const capture=(_options,callback)=>{pending=callback;message('Lumen: выберите источник и разрешите передачу звука в системном диалоге. Захват начинается только после вашего выбора.');};
-  try { if(!chrome.tabCapture)chrome.tabCapture={};chrome.tabCapture.capture=capture;if(chrome.tabCapture.capture!==capture)Object.defineProperty(chrome.tabCapture,'capture',{value:capture}); }
-  catch(error){message('Не удалось подключить совместимый захват: '+error.message);}
+// Official Shazam only: explicit recognition click starts native WASAPI loopback.
+(()=>{
+ if(location.protocol!=='chrome-extension:'||location.hostname!=='mmioliijnhnoblpgimnlajmefafdfilb'||!window.ipc)return;
+ const send=cmd=>window.ipc.postMessage(JSON.stringify({cmd}));
+ let context=null,destination=null,stream=null,next=0,active=false;
+ const captured=new WeakSet(),create=AudioContext.prototype.createMediaStreamSource;
+ AudioContext.prototype.createMediaStreamSource=function(s){const node=create.call(this,s);if(captured.has(s)){const connect=node.connect;node.connect=function(target,...args){if(target instanceof AudioDestinationNode)return target;return connect.call(this,target,...args);};}return node;};
+ function stop(){if(!active)return;active=false;send('capture_stop');if(context)context.close().catch(()=>{});context=null;destination=null;stream=null;}
+ window.__lumenAudio=(rate,b64)=>{
+   if(!active||!context)return;
+   const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0)),data=new Float32Array(bytes.buffer);
+   const buffer=context.createBuffer(1,data.length,rate);buffer.copyToChannel(data,0);
+   const source=context.createBufferSource();source.buffer=buffer;source.connect(destination);
+   next=Math.max(next,context.currentTime+.06);if(next-context.currentTime>1)next=context.currentTime+.06;
+   source.start(next);next+=buffer.duration;source.onended=()=>source.disconnect();
+ };
+ window.__lumenAudioEnd=stop;
+ window.__lumenAudioError=error=>{stop();const banner=document.createElement('div');banner.textContent='Lumen: не удалось получить системный звук: '+error;banner.style.cssText='padding:12px;background:#35212a;color:white;font:13px Segoe UI';document.body.prepend(banner);};
+ const capture=(_options,callback)=>{
+   stop();active=true;context=new AudioContext();context.resume().catch(()=>{});destination=context.createMediaStreamDestination();stream=destination.stream;captured.add(stream);next=0;
+   for(const track of stream.getAudioTracks()){const end=track.stop.bind(track);track.stop=()=>{end();stop();};}
+   send('capture_start');callback(stream);
+ };
+ if(!chrome.tabCapture)chrome.tabCapture={};chrome.tabCapture.capture=capture;
+ addEventListener('pagehide',stop);addEventListener('beforeunload',stop);
+ // The popup was opened explicitly from Lumen's extension button. Start once,
+ // after Shazam's React UI is ready; never click history/delete controls.
+ let autoStarted=false;
+ const auto=()=>{if(autoStarted||active)return;const logo=document.querySelector('svg.BJ6G5IZZlwRqJcpMnRZt, .UzFtPrKfFvs2DkfORpRs svg');if(logo){autoStarted=true;logo.dispatchEvent(new MouseEvent('click',{bubbles:true}));}};
+ addEventListener('DOMContentLoaded',()=>{auto();const observer=new MutationObserver(()=>{auto();if(autoStarted)observer.disconnect();});observer.observe(document.body,{childList:true,subtree:true});setTimeout(()=>observer.disconnect(),10000);});
 })();

@@ -29,6 +29,20 @@ for($attempt=0;$attempt -lt 8;$attempt++) {
   if($ui -and $dev){break};Start-Sleep -Milliseconds 500
 }
 if(-not $ui -or -not $dev){throw 'Lumen UI targets not found'}
+$hints=Invoke-Cdp $ui 'Runtime.evaluate' @{expression="(async()=>{const b=document.getElementById('devbtn');b.title='Test label';await new Promise(r=>setTimeout(r,40));const s=getComputedStyle(b);return JSON.stringify({titles:document.querySelectorAll('[title]').length,label:b.getAttribute('aria-label'),shadow:s.boxShadow,transform:s.transform})})()";returnByValue=$true;awaitPromise=$true}
+$hintState=$hints.result.result.value|ConvertFrom-Json
+if($hintState.titles -ne 0 -or $hintState.label -ne 'Test label' -or $hintState.shadow -ne 'none' -or $hintState.transform -ne 'none'){throw 'Button appearance regression'}
+Write-Output 'Native hints removed; accessible labels retained; no button shadow or scale: OK'
+$controls=Invoke-Cdp $ui 'Runtime.evaluate' @{expression="JSON.stringify({close:typeof document.getElementById('wclose').onclick,maximize:typeof document.getElementById('wmax').onclick,zoom:typeof document.getElementById('zin').onclick,drag:typeof dragZone})";returnByValue=$true}
+$buttons=$controls.result.result.value|ConvertFrom-Json
+foreach($property in $buttons.PSObject.Properties){if($property.Value -ne 'function'){throw ('Missing handler: '+$property.Name)}}
+Write-Output 'Window controls, zoom and drag initialization: OK'
+$before=Invoke-Cdp $ui 'Runtime.evaluate' @{expression='state.tabs.length';returnByValue=$true}
+Invoke-Cdp $ui 'Runtime.evaluate' @{expression="document.getElementById('plus').click()";returnByValue=$true}|Out-Null
+Start-Sleep -Milliseconds 400
+$after=Invoke-Cdp $ui 'Runtime.evaluate' @{expression='state.tabs.length';returnByValue=$true}
+if($after.result.result.value -le $before.result.result.value){throw 'New tab button did not work'}
+Write-Output 'New tab through UI handler: OK'
 $opened=Invoke-Cdp $ui 'Runtime.evaluate' @{expression="if(!state.dev_open)window.ipc.postMessage(JSON.stringify({cmd:'dev_tools'}))";returnByValue=$true}
 if($opened.result.exceptionDetails){throw ($opened.result.exceptionDetails|ConvertTo-Json -Compress)}
 Start-Sleep -Milliseconds 4000

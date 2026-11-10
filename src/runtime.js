@@ -119,18 +119,45 @@
     }
   };
 
+  // Yandex cards can split the advertising label across spans and load the
+  // creative after the label. Select the card, never the whole forecast/feed.
+  const scanYandex = () => {
+    if (!/(^|\.)(yandex\.(ru|com|by|kz|uz|com\.tr)|ya\.ru)$/.test(location.hostname)) return;
+    document.querySelectorAll('[id^="yandex_rtb"],[id^="yandex_ad"],[id*="adfox"],[class*="adfox"],.ya-partner__ads').forEach(hide);
+    const seeds = new Set();
+    document.querySelectorAll('a[href], [aria-label], [title], span, small').forEach(el => {
+      const href=el.getAttribute('href')||'';
+      const text=(el.textContent||'').replace(/\s+/g,' ').trim();
+      if (/^https?:\/\/(?:yabs\.yandex\.[^/]+|an\.yandex\.[^/]+)\//i.test(href) ||
+          isLabel(el.getAttribute('aria-label')) || isLabel(el.getAttribute('title')) ||
+          (el.children.length < 4 && isLabel(text))) seeds.add(el);
+    });
+    for (const seed of seeds) {
+      let best=null;
+      for(let el=seed,depth=0;el&&el!==document.body&&depth<12;el=el.parentElement,depth++){
+        if(el.matches('main,header,nav,footer,[role="main"]'))break;
+        if(best && el.querySelectorAll('img,video,iframe').length>best.querySelectorAll('img,video,iframe').length)break;
+        const rect=el.getBoundingClientRect();
+        if(rect.width>650||rect.height>1000)break;
+        if(labelsIn(el,2)>1)break;
+        if(rect.width>=140&&rect.height>=80&&el.querySelector('img,video,iframe')&&el.querySelector('a[href]'))best=el;
+      }
+      if(best)hide(best);
+    }
+  };
+
   // ---------- запуск ----------
   const run = () => {
     timer = 0; last = Date.now();
     if (rules.length) runRules();
-    if (window.__lumenCfg.labels) { try { scanLabels(); } catch (_) {} }
+    if (window.__lumenCfg.labels) { try { scanYandex(); scanLabels(); } catch (_) {} }
   };
   const schedule = () => {
     if (timer) return;
     timer = setTimeout(run, Math.max(300, 1000 - (Date.now() - last)));
   };
   window.__lumenSetRules = (arr) => { rules = Array.isArray(arr) ? arr : []; schedule(); };
-  new MutationObserver(schedule).observe(document, { childList: true, subtree: true });
+  new MutationObserver(schedule).observe(document, { childList: true, subtree: true, characterData:true, attributes:true, attributeFilter:['href','aria-label','title','src'] });
   document.addEventListener('DOMContentLoaded', schedule);
   schedule();
 })();

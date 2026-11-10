@@ -5,6 +5,7 @@ mod ext;
 mod filters;
 mod hook;
 mod music;
+mod capture;
 mod sys;
 mod devtools;
 mod transfer;
@@ -121,7 +122,6 @@ enum Shortcut {
     Incognito,
     History,
     Settings,
-    Music,
     AddLink,
     NextTab,
     PrevTab,
@@ -152,7 +152,7 @@ fn map_key(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut> {
         (0x4E, true, true, false) => Some(Incognito),          // Ctrl+Shift+N
         (0x48, true, false, false) => Some(History),           // Ctrl+H
         (0xBC, true, false, false) => Some(Settings),          // Ctrl+,
-        (0x4D, true, false, false) => Some(Music),             // Ctrl+M
+                     // Ctrl+M
         (0x44, true, false, false) => Some(AddLink),           // Ctrl+D
         (0x09, true, false, false) => Some(NextTab),           // Ctrl+Tab
         (0x09, true, true, false) => Some(PrevTab),            // Ctrl+Shift+Tab
@@ -707,7 +707,6 @@ impl App {
         let page_nav = page.clone();
 
         let mut b = WebViewBuilder::with_web_context(&mut self.ctx)
-            .with_initialization_script(include_str!("shazam-capture.js"))
             .with_devtools(true)
             .with_incognito(incognito)
             .with_browser_extensions_enabled(!incognito)
@@ -794,7 +793,7 @@ impl App {
             None => b.with_html(newtab),
         };
         let wv = b.build_as_child(&self.window).expect("не удалось создать WebView2");
-        let _ = hook::install_blocker(&wv, self.filters.clone(), self.adblock.clone(), page, self.stats.clone());
+        let _ = hook::install_blocker(&wv, self.filters.clone(), self.adblock.clone(), page, self.stats.clone(), self.blocker.clone());
         let _ = hook::install_shortcuts(&wv, move |vk, ctrl, shift, alt| {
             if vk == 0x1B && !fullscreen_keys.load(Ordering::Relaxed) { return false; }
             match map_key(vk, ctrl, shift, alt) {
@@ -984,7 +983,7 @@ impl App {
     /// Отдельное маленькое окно для расширения (как всплывающее окно у кнопки расширения).
     fn open_popup(&self, url: &str) {
         let sf = self.window.scale_factor();
-        let (w, h) = (420.0f64, 620.0f64);
+        let (w, h) = (if url.contains("mmioliijnhnoblpgimnlajmefafdfilb") { 470.0f64 } else { 420.0f64 }, 620.0f64);
         let pos = self.window.outer_position().ok().map(|p| {
             let ow = self.window.outer_size().width as i32;
             (p.x + ow - (w * sf) as i32 - (24.0 * sf) as i32, p.y + ((TOOLBAR_H + 6.0) * sf) as i32)
@@ -1024,6 +1023,7 @@ impl App {
     /// Восстанавливает вкладки прошлого сеанса: загружается только активная, остальные «спят».
     fn restore_session(&mut self, s: Session) {
         for t in &s.tabs {
+            if t.u.starts_with("chrome-extension://mmioliijnhnoblpgimnlajmefafdfilb/") { continue; }
             let id = self.next_id;
             self.next_id += 1;
             self.tabs.push(Tab {
@@ -1037,6 +1037,7 @@ impl App {
                 low: false,
             });
         }
+        if self.tabs.is_empty() { self.new_tab(None); return; }
         let idx = s.active.min(self.tabs.len().saturating_sub(1));
         let id = self.tabs[idx].id;
         self.activate(id);
@@ -1528,7 +1529,6 @@ impl App {
                 });
             }
             Cmd::ExtOpen { id } => match self.ext_page(&id) {
-                Some((u, _)) if id == "mmioliijnhnoblpgimnlajmefafdfilb" => self.new_tab(Some(u)),
                 Some((u, true)) => self.open_popup(&u),
                 Some((u, false)) => self.new_tab(Some(u)),
                 None => {
@@ -1840,7 +1840,6 @@ impl App {
                 Shortcut::Incognito => self.cmd(Cmd::Incognito),
                 Shortcut::History => self.cmd(Cmd::OpenPanel { name: "history".into() }),
                 Shortcut::Settings => self.cmd(Cmd::OpenPanel { name: "settings".into() }),
-                Shortcut::Music => self.cmd(Cmd::Recognize),
                 Shortcut::AddLink => self.cmd(Cmd::AddCurrentLink),
                 Shortcut::Back => self.cmd(Cmd::Back),
                 Shortcut::Forward => self.cmd(Cmd::Forward),
@@ -1979,15 +1978,16 @@ fn safe_url(u: &str) -> bool {
 }
 
 /// Режим «всплывающего окна» расширения: маленькое окно без вкладок, закрывается при потере фокуса.
-fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: String, profile: PathBuf) {
+fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: String, profile: PathBuf, theme: String) {
     let keep_open = url.starts_with("chrome-extension://mmioliijnhnoblpgimnlajmefafdfilb/");
-    let event_loop = EventLoopBuilder::<()>::new().build();
+    let event_loop = EventLoopBuilder::<String>::with_user_event().build();
+    let capture_proxy = event_loop.create_proxy();
     let icon = tao::window::Icon::from_rgba(ICON_RGBA.to_vec(), 64, 64).ok();
     let mut wb = WindowBuilder::new()
         .with_window_icon(icon)
         .with_title("Lumen — расширение")
         .with_inner_size(tao::dpi::LogicalSize::new(size.0, size.1))
-        .with_always_on_top(!keep_open);
+        .with_always_on_top(true);
     if let Some((x, y)) = pos {
         wb = wb.with_position(tao::dpi::PhysicalPosition::new(x, y));
     }
@@ -1995,6 +1995,10 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
     let mut ctx = WebContext::new(Some(profile));
     let webview = WebViewBuilder::with_web_context(&mut ctx)
         .with_initialization_script(include_str!("shazam-capture.js"))
+        .with_initialization_script(&format!("window.__lumenPopupTheme={};",serde_json::to_string(&theme).unwrap()))
+        .with_initialization_script(include_str!("shazam-theme.js"))
+        .with_navigation_handler(move |url| !keep_open || url == "about:blank" || url.starts_with("chrome-extension://mmioliijnhnoblpgimnlajmefafdfilb/"))
+        .with_ipc_handler(move |req:wry::http::Request<String>| { if keep_open { let _=capture_proxy.send_event(req.body().clone()); } })
         .with_devtools(false)
         .with_incognito(false)
         .with_browser_extensions_enabled(true)
@@ -2002,15 +2006,40 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
         .with_url(&url)
         .build(&window)
         .expect("не удалось создать WebView2");
-    let mut was_focused = false;
+    let mut capture_stop=Arc::new(AtomicBool::new(false));
+    let mut audio_rx=None;
     event_loop.run(move |event, _, flow| {
-        *flow = ControlFlow::Wait;
+        use base64::Engine;
+        *flow = ControlFlow::WaitUntil(Instant::now()+Duration::from_millis(20));
+        if let Event::UserEvent(message)=&event {
+            if let Ok(value)=serde_json::from_str::<serde_json::Value>(message) {
+                match value["cmd"].as_str() {
+                    Some("capture_start") => {
+                        capture_stop.store(true,Ordering::Relaxed);
+                        capture_stop=Arc::new(AtomicBool::new(false));
+                        let(tx,rx)=mpsc::sync_channel(32);audio_rx=Some(rx);
+                        capture::start(tx,capture_stop.clone());
+                    },
+                    Some("capture_stop")=>{capture_stop.store(true,Ordering::Relaxed);audio_rx=None;},
+                    _=>{}
+                }
+            }
+        }
+        if let Some(rx)=&audio_rx { for packet in rx.try_iter().take(16) {
+            match packet {
+                capture::Packet::Audio(rate,samples)=>{
+                    let bytes:Vec<u8>=samples.iter().flat_map(|x|x.to_le_bytes()).collect();
+                    let b64=base64::engine::general_purpose::STANDARD.encode(bytes);
+                    let _=webview.evaluate_script(&format!("window.__lumenAudio({rate},'{b64}')"));
+                },
+                capture::Packet::Error(error)=>{let _=webview.evaluate_script(&format!("window.__lumenAudioError({})",serde_json::to_string(&error).unwrap()));}
+                capture::Packet::End=>{let _=webview.evaluate_script("window.__lumenAudioEnd()");}
+            }
+        }}
         let _ = &webview;
         if let Event::WindowEvent { event: we, .. } = event {
             match we {
-                WindowEvent::CloseRequested => *flow = ControlFlow::Exit,
-                WindowEvent::Focused(true) => was_focused = true,
-                WindowEvent::Focused(false) if was_focused && !keep_open => *flow = ControlFlow::Exit,
+                WindowEvent::CloseRequested => {capture_stop.store(true,Ordering::Relaxed);*flow = ControlFlow::Exit;},
                 _ => {}
             }
         }
@@ -2045,7 +2074,7 @@ fn main() {
     std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", &args);
 
     if let Some(url) = cli.popup.clone().filter(|u| safe_url(u)) {
-        run_popup(url, cli.size.unwrap_or((420.0, 620.0)), cli.pos, args, dir.join("profile"));
+        run_popup(url, cli.size.unwrap_or((470.0, 620.0)), cli.pos, args, dir.join("profile"), settings.theme.clone());
         return;
     }
 
@@ -2136,7 +2165,7 @@ fn main() {
         .with_visible(false)
         .with_window_icon(icon)
         .with_decorations(false) // вкладки и кнопки окна рисует сам браузер
-        .with_title(if incognito { "Lumen 0.3 — Инкогнито" } else { "Lumen 0.3" })
+        .with_title(if incognito { "Lumen 0.3.6 — Инкогнито" } else { "Lumen 0.3.6" })
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(480.0, 320.0));
     if let Some((x, y)) = cli.pos {

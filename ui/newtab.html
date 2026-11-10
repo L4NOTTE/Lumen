@@ -75,7 +75,7 @@
 </style>
 <style id="vars">/*__VARS__*/</style>
 <style id="bgcss">/*__BGCSS__*/</style>
-</head>
+<style>button,button:hover,button:active,button:focus{transform:none!important;transition:none!important;outline:none!important;box-shadow:none!important}.tile:hover{transform:none!important;background:transparent!important}</style></head>
 <body>
 <main>
   <h1><b>L</b>UMEN</h1>
@@ -136,5 +136,16 @@
     cmd('add', { t: dn.value, u: du.value });
   };
 </script>
-</body>
+<script>function removeNativeHints(root) {
+  const elements = root.nodeType === 1 ? [root, ...root.querySelectorAll('[title]')] : [...root.querySelectorAll('[title]')];
+  for (const el of elements) {
+    const text = el.getAttribute('title');
+    if (text === null) continue;
+    if (text) { el.setAttribute('aria-label', text); el.setAttribute('data-hint', text); }
+    el.removeAttribute('title');
+  }
+}
+removeNativeHints(document);
+new MutationObserver(records => { for (const r of records) { if (r.type === 'attributes') removeNativeHints(r.target); else r.addedNodes.forEach(n => { if (n.nodeType === 1) removeNativeHints(n); }); } }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['title']});
+</script></body>
 </html>
