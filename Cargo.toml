@@ -1,6 +1,6 @@
 [package]
 name = "lumen"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "Lumen — лаконичный браузер для Windows на Rust"
 
@@ -15,8 +15,10 @@ dirs = "5"
 adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
 webview2-com = "0.33"
 windows-core = "0.58"
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse"] }
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm"] }
 cpal = "0.15"
+base64 = "0.22"
+sha2 = "0.10"
 
 [build-dependencies]
 embed-resource = "3"

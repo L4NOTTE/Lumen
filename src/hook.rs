@@ -22,6 +22,24 @@ use wry::{WebView, WebViewExtWindows};
 
 use crate::filters::Filters;
 
+pub fn install_fullscreen(wv: &WebView, changed: impl Fn(bool) + 'static) -> windows_core::Result<()> {
+    unsafe {
+        let core = wv.controller().CoreWebView2()?;
+        let mut token = Default::default();
+        core.add_ContainsFullScreenElementChanged(
+            &webview2_com::ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
+                if let Some(sender) = sender {
+                    let mut full = windows::Win32::Foundation::BOOL::default();
+                    sender.ContainsFullScreenElement(&mut full)?;
+                    changed(full.as_bool());
+                }
+                Ok(())
+            })), &mut token,
+        )?;
+    }
+    Ok(())
+}
+
 /// Движок фильтров, общий для всех вкладок (появляется после загрузки списков).
 pub type SharedFilters = Rc<RefCell<Option<Arc<Filters>>>>;
 

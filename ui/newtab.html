@@ -67,6 +67,11 @@
   @keyframes fade { from { opacity:0; } to { opacity:1; } }
   @keyframes rise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
   @media (prefers-reduced-motion: reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+  main { min-height:100%; height:auto; gap:clamp(14px,4vh,28px); padding:clamp(20px,6vh,70px) 12px; }
+  h1 { font-size:clamp(30px,7vw,52px); }
+  #tiles { max-width:100%; }
+  #dlg { overflow:auto; padding:16px; }
+  @media(max-height:500px) { .ic{width:44px;height:44px;border-radius:12px}.tile{gap:5px;padding:6px 4px}main{gap:14px} }
 </style>
 <style id="vars">/*__VARS__*/</style>
 <style id="bgcss">/*__BGCSS__*/</style>

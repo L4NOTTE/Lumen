@@ -6,6 +6,8 @@ mod filters;
 mod hook;
 mod music;
 mod sys;
+mod devtools;
+mod transfer;
 
 use std::{
     cell::RefCell,
@@ -39,13 +41,14 @@ use wry::{
 
 const TOOLBAR_H: f64 = 80.0;
 const UI_HTML: &str = include_str!("../ui/ui.html");
+const DEV_HTML: &str = include_str!("../ui/devtools.html");
 const NEWTAB_HTML: &str = include_str!("../ui/newtab.html");
 
 /// Аргументы движка. SmartScreen остаётся включённым, перевод страниц выключен,
 /// число процессов ограничено, вкладки одного сайта делят процесс (экономия памяти).
 /// «Эконом-режим» дополнительно включает облегчённый режим Chromium и отключает кэш переходов назад.
 /// У всех окон одного профиля аргументы обязаны совпадать, поэтому строка считается один раз при запуске.
-fn browser_args(eco: bool) -> String {
+fn browser_args(eco: bool, debug_port: u16) -> String {
     let mut disabled = String::from("Translate,msWebOOUI,msPdfOOUI");
     let mut extra = String::new();
     if eco {
@@ -54,7 +57,7 @@ fn browser_args(eco: bool) -> String {
     }
     let limit = if eco { 3 } else { 4 };
     format!(
-        "--enable-features=ParallelDownloading --disable-features={disabled} --renderer-process-limit={limit} --process-per-site{extra}"
+        "--enable-features=ParallelDownloading --disable-features={disabled} --renderer-process-limit={limit} --process-per-site --remote-debugging-port={debug_port} --remote-debugging-address=127.0.0.1{extra}"
     )
 }
 
@@ -110,6 +113,7 @@ struct Session {
 
 #[derive(Clone, Copy, Debug)]
 enum Shortcut {
+    ZoomIn, ZoomOut, ZoomReset, DevTools, Fullscreen, Escape,
     NewTab,
     Reopen,
     CloseTab,
@@ -135,6 +139,12 @@ enum LinkCmd {
 fn map_key(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut> {
     use Shortcut::*;
     match (vk, ctrl, shift, alt) {
+        (0xBB | 0x6B, true, _, false) => Some(ZoomIn),
+        (0xBD | 0x6D, true, _, false) => Some(ZoomOut),
+        (0x30 | 0x60, true, false, false) => Some(ZoomReset),
+        (0x7B, false, false, false) | (0x49, true, true, false) => Some(DevTools),
+        (0x7A, false, false, false) => Some(Fullscreen),
+        (0x1B, false, false, false) => Some(Escape),
         (0x54, true, false, false) => Some(NewTab),            // Ctrl+T
         (0x54, true, true, false) => Some(Reopen),             // Ctrl+Shift+T
         (0x57, true, false, false) => Some(CloseTab),          // Ctrl+W
@@ -317,6 +327,10 @@ struct HistEntry {
 // ---------- события ----------
 
 enum UserEvent {
+    DevTarget(u32, Result<String, String>),
+    DevResult(String),
+    Pulse,
+    FullscreenChanged(u32, bool),
     Ui(String),
     Title(u32, String),
     Url(u32, String),
@@ -335,7 +349,7 @@ enum UserEvent {
     Music(MusicState),
     Shortcut(Shortcut),
     Link(LinkCmd),
-    ExtAdded(PathBuf, Option<String>),
+    ExtAdded(PathBuf, Result<String, String>),
     Flush,
     Quit,
 }
@@ -343,6 +357,14 @@ enum UserEvent {
 #[derive(Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Cmd {
+    WinResize { edge: String },
+    DevConnect,
+    NativeDevTools,
+    FrameTheme { dark: bool },
+    DevClose,
+    DevWidth { width: f64 },
+    DevQuery { kind: String, expression: Option<String> },
+    ZoomIn, ZoomOut, ZoomReset, DevTools, Fullscreen, Escape,
     Ready,
     NewTab,
     CloseTab { id: u32 },
@@ -401,6 +423,15 @@ struct Tab {
 }
 
 struct App {
+    debug_port: u16,
+    frame_dark: bool,
+    dev: WebView,
+    dev_open: bool,
+    dev_width: f64,
+    fullscreen_keys: Arc<AtomicBool>,
+    transferring: HashMap<u32, Instant>,
+    fullscreen: bool,
+    zoom: HashMap<u32, f64>,
     window: Window,
     ui: WebView,
     ctx: WebContext,
@@ -445,13 +476,29 @@ fn toolbar_px(w: &Window) -> u32 {
     (TOOLBAR_H * w.scale_factor()).round() as u32
 }
 
+fn animate_window(w: &Window, show: bool) {
+    use windows::Win32::{Foundation::{HWND, BOOL}, UI::WindowsAndMessaging::*};
+    unsafe {
+        // Keep tao's VISIBLE flag in sync: AnimateWindow alone bypasses its state.
+        if show { w.set_visible(true); }
+        let mut enabled = BOOL::default();
+        // Respect Windows' accessibility preference for client animations.
+        if SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, Some(&mut enabled as *mut _ as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)).is_ok() && enabled.as_bool() {
+            if show { let _ = ShowWindow(HWND(w.hwnd() as *mut _), SW_HIDE); }
+            if AnimateWindow(HWND(w.hwnd() as *mut _), 120, if show { AW_BLEND | AW_ACTIVATE } else { AW_BLEND | AW_HIDE }).is_err() && show { w.set_visible(true); }
+        } else if show { w.set_visible(true); }
+    }
+}
+
 /// Отступ от края окна: по нему окно без рамки можно растягивать мышью (в развёрнутом виде не нужен).
 fn inset_px(w: &Window) -> u32 {
-    if w.is_maximized() {
-        0
-    } else {
-        (5.0 * w.scale_factor()).round() as u32
-    }
+    let _ = w;
+    0
+}
+
+fn dock_width(width: u32, scale: f64, preferred: f64) -> u32 {
+    let logical = width as f64 / scale;
+    (preferred.clamp(240.0, 960.0).min((logical - 240.0).max(logical * 0.45)) * scale).round() as u32
 }
 
 fn content_rect(w: &Window) -> Rect {
@@ -660,7 +707,8 @@ impl App {
         let page_nav = page.clone();
 
         let mut b = WebViewBuilder::with_web_context(&mut self.ctx)
-            .with_devtools(cfg!(debug_assertions))
+            .with_initialization_script(include_str!("shazam-capture.js"))
+            .with_devtools(true)
             .with_incognito(incognito)
             .with_browser_extensions_enabled(!incognito)
             .with_additional_browser_args(&self.args)
@@ -740,19 +788,27 @@ impl App {
             b = b.with_initialization_script(&rt);
         }
         let p_key = self.proxy.clone();
+        let fullscreen_keys = self.fullscreen_keys.clone();
         b = match url {
             Some(u) => b.with_url(u),
             None => b.with_html(newtab),
         };
         let wv = b.build_as_child(&self.window).expect("не удалось создать WebView2");
         let _ = hook::install_blocker(&wv, self.filters.clone(), self.adblock.clone(), page, self.stats.clone());
-        let _ = hook::install_shortcuts(&wv, move |vk, ctrl, shift, alt| match map_key(vk, ctrl, shift, alt) {
+        let _ = hook::install_shortcuts(&wv, move |vk, ctrl, shift, alt| {
+            if vk == 0x1B && !fullscreen_keys.load(Ordering::Relaxed) { return false; }
+            match map_key(vk, ctrl, shift, alt) {
             Some(sc) => {
                 let _ = p_key.send_event(UserEvent::Shortcut(sc));
                 true
             }
             None => false,
+        }});
+        let p = self.proxy.clone();
+        let _ = hook::install_fullscreen(&wv, move |full| {
+            let _ = p.send_event(UserEvent::FullscreenChanged(id, full));
         });
+        let _ = wv.zoom(*self.zoom.get(&id).unwrap_or(&1.0));
         wv
     }
 
@@ -775,6 +831,8 @@ impl App {
 
     /// Делает вкладку активной (закрывая панели); если она «спала» — будит.
     fn activate(&mut self, id: u32) {
+        if !self.tabs.iter().any(|t| t.id == id) { return; }
+        if id != self.active && self.fullscreen { self.set_fullscreen(false); }
         self.active = id;
         self.panel.clear();
         let sleeping = self.tabs.iter().find(|t| t.id == id).map(|t| t.webview.is_none());
@@ -793,6 +851,7 @@ impl App {
             let _ = wv.focus();
         });
         self.push_state();
+        if self.dev_open { self.cmd(Cmd::DevConnect); }
     }
 
     fn close_panel(&mut self) {
@@ -808,7 +867,23 @@ impl App {
     }
 
     fn layout(&mut self) {
-        let open = !self.panel.is_empty();
+        let open = !self.panel.is_empty() && !self.fullscreen;
+        let docked = self.dev_open && !self.fullscreen && !open;
+        let mut page_rect = if self.fullscreen { full_rect(&self.window) } else { content_rect(&self.window) };
+        let size = self.window.inner_size();
+        let i = inset_px(&self.window);
+        let available_width = size.width.saturating_sub(2 * i);
+        let available_height = size.height.saturating_sub(toolbar_px(&self.window) + 2 * i);
+        let dock = dock_width(available_width, self.window.scale_factor(), self.dev_width).min(available_width);
+        if docked {
+            page_rect.size = PhysicalSize::new(available_width.saturating_sub(dock), available_height).into();
+            let _ = self.dev.set_bounds(Rect {
+                position: PhysicalPosition::new((size.width - i - dock) as i32, (toolbar_px(&self.window) + i) as i32).into(),
+                size: PhysicalSize::new(dock, available_height).into(),
+            });
+        }
+        let _ = self.dev.set_visible(docked);
+        let _ = self.ui.set_visible(!self.fullscreen);
         // при открытой панели интерфейс занимает всё окно, а страница скрыта
         let _ = self.ui.set_bounds(if open { full_rect(&self.window) } else { ui_rect(&self.window) });
         for t in self.tabs.iter_mut() {
@@ -819,7 +894,7 @@ impl App {
                         hook::resume(wv);
                         t.suspended = false;
                     }
-                    let _ = wv.set_bounds(content_rect(&self.window));
+                    let _ = wv.set_bounds(page_rect);
                 }
                 let _ = wv.set_visible(visible);
                 // скрытые вкладки переводим в режим низкого потребления памяти
@@ -850,8 +925,11 @@ impl App {
         let (al, ad) = accent_pair(&s.accent);
         let state = serde_json::json!({
             "tabs": tabs,
+            "version": env!("CARGO_PKG_VERSION"),
             "active": self.active,
-            "panel": self.panel,
+            "zoom": (self.zoom.get(&self.active).copied().unwrap_or(1.0) * 100.0).round(),
+            "panel": if self.dev_open && self.panel.is_empty() { "dev" } else { &self.panel },
+            "dev_open": self.dev_open,
             "maximized": self.window.is_maximized(),
             "incognito": self.incognito,
             "engine": s.engine,
@@ -881,6 +959,7 @@ impl App {
             "music_cfg": { "token": s.audd_token, "source": s.music_source },
         });
         let _ = self.ui.evaluate_script(&format!("window.onState({state})"));
+        let _ = self.dev.evaluate_script(&format!("window.onState({state})"));
         self.save_session();
     }
 
@@ -921,7 +1000,8 @@ impl App {
     }
 
     fn update_window_bg(&self) {
-        self.window.set_background_color(Some(window_bg(&self.window, &self.settings.theme, self.incognito)));
+        let theme = if self.settings.theme == "system" { if self.frame_dark { "dark" } else { "light" } } else { &self.settings.theme };
+        self.window.set_background_color(Some(window_bg(&self.window, theme, self.incognito)));
     }
 
     fn save_session(&self) {
@@ -1166,11 +1246,88 @@ impl App {
         self.push_state();
     }
 
+    fn set_fullscreen(&mut self, full: bool) {
+        if self.fullscreen == full { return; }
+        self.fullscreen = full;
+        self.fullscreen_keys.store(full, Ordering::Relaxed);
+        self.window.set_fullscreen(if full { Some(tao::window::Fullscreen::Borderless(self.window.current_monitor())) } else { None });
+        self.layout();
+        self.with_active(|wv| { let _ = wv.focus(); });
+    }
+
+    fn change_zoom(&mut self, step: i32) {
+        let old = self.zoom.get(&self.active).copied().unwrap_or(1.0);
+        let next = if step == 0 { 1.0 } else { ((old * 100.0 + step as f64 * 10.0).round() / 100.0).clamp(0.25, 5.0) };
+        self.with_active(|wv| { let _ = wv.zoom(next); });
+        self.zoom.insert(self.active, next);
+        self.push_state();
+    }
+
     fn cmd(&mut self, c: Cmd) {
         match c {
+            Cmd::WinResize { edge } => {
+                use tao::window::ResizeDirection::*;
+                let direction = match edge.as_str() { "n" => North, "ne" => NorthEast, "nw" => NorthWest, "e" => East, "w" => West, _ => return };
+                let _ = self.window.drag_resize_window(direction);
+            },
+            Cmd::DevConnect => {
+                let proxy = self.proxy.clone();
+                let id = self.active;
+                self.with_active(|wv| unsafe {
+                    if let Ok(core) = wv.controller().CoreWebView2() {
+                        let handler = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, json| {
+                            let target = if result.is_ok() {
+                                serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|j| j["targetInfo"]["targetId"].as_str().map(str::to_string)).ok_or_else(|| "WebView2 не вернул targetId".to_string())
+                            } else { Err(format!("Target.getTargetInfo: {result:?}")) };
+                            let _ = proxy.send_event(UserEvent::DevTarget(id, target)); Ok(())
+                        }));
+                        let _ = core.CallDevToolsProtocolMethod(&windows_core::HSTRING::from("Target.getTargetInfo"), &windows_core::HSTRING::from("{}"), &handler);
+                    }
+                });
+            },
+            Cmd::FrameTheme { dark } => {
+                self.frame_dark = dark;
+                self.window.set_background_color(Some(if self.incognito { (22,15,36,255) } else if dark { (27,28,32,255) } else { (243,244,246,255) }));
+            },
+            Cmd::DevClose => { self.dev_open = false; let _ = self.dev.load_html(DEV_HTML); self.layout(); self.push_state(); },
+            Cmd::DevWidth { width } => { if width.is_finite() { self.dev_width = width.clamp(240.0, 960.0); self.layout(); } },
+            Cmd::DevQuery { kind, expression } => {
+                let (method, params) = match kind.as_str() {
+                    "console" => ("Runtime.evaluate", serde_json::json!({"expression": expression.unwrap_or_default(), "returnByValue": true, "awaitPromise": true, "generatePreview": true})),
+                    "network" => ("Runtime.evaluate", serde_json::json!({"expression": "performance.getEntriesByType('resource').slice(-200).map(r=>({url:r.name,type:r.initiatorType,ms:Math.round(r.duration),bytes:r.transferSize}))", "returnByValue": true})),
+                    "storage" => ("Runtime.evaluate", serde_json::json!({"expression": "({cookies:document.cookie,localStorage:Object.fromEntries(Object.entries(localStorage)),sessionStorage:Object.fromEntries(Object.entries(sessionStorage))})", "returnByValue": true})),
+                    "performance" => ("Runtime.evaluate", serde_json::json!({"expression":"({navigation:performance.getEntriesByType('navigation').map(n=>({url:n.name,domReadyMs:Math.round(n.domContentLoadedEventEnd),loadMs:Math.round(n.loadEventEnd),responseMs:Math.round(n.responseEnd)})),resources:performance.getEntriesByType('resource').length,memory:performance.memory?{usedBytes:performance.memory.usedJSHeapSize,totalBytes:performance.memory.totalJSHeapSize}:null})", "returnByValue":true})),
+                    _ => return,
+                };
+                let p = self.proxy.clone();
+                self.with_active(|wv| unsafe {
+                    if let Ok(core) = wv.controller().CoreWebView2() {
+                        let handler = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |res, value| {
+                            let text = if res.is_ok() { value } else { format!("Ошибка DevTools: {res:?}") };
+                            let _ = p.send_event(UserEvent::DevResult(text));
+                            Ok(())
+                        }));
+                        let _ = core.CallDevToolsProtocolMethod(&windows_core::HSTRING::from(method), &windows_core::HSTRING::from(params.to_string()), &handler);
+                    }
+                });
+            }
+            Cmd::ZoomIn => self.change_zoom(1),
+            Cmd::ZoomOut => self.change_zoom(-1),
+            Cmd::ZoomReset => self.change_zoom(0),
+            Cmd::DevTools => {
+                if self.dev_open { self.cmd(Cmd::DevClose); }
+                else { self.dev_open = true; self.panel.clear(); self.layout(); self.push_state(); self.cmd(Cmd::DevConnect); }
+            },
+            Cmd::NativeDevTools => self.with_active(|wv| unsafe {
+                if let Ok(core) = wv.controller().CoreWebView2() { let _ = core.OpenDevToolsWindow(); }
+            }),
+            Cmd::Fullscreen => self.set_fullscreen(!self.fullscreen),
+            Cmd::Escape => { if self.fullscreen { self.with_active(|wv| { let _ = wv.evaluate_script("document.exitFullscreen().catch(()=>{})"); }); self.set_fullscreen(false); } else { self.close_panel(); } },
             Cmd::Ready => self.push_state(),
             Cmd::NewTab => self.new_tab(None),
             Cmd::CloseTab { id } => {
+                if id == self.active && self.fullscreen { self.set_fullscreen(false); }
+                self.zoom.remove(&id);
                 if let Some(t) = self.tabs.iter().find(|t| t.id == id) {
                     if t.url.starts_with("http") {
                         self.closed.push((t.url.clone(), t.title.clone()));
@@ -1239,7 +1396,8 @@ impl App {
                 }
             }
             Cmd::OpenPanel { name } => {
-                if matches!(name.as_str(), "history" | "settings" | "ext" | "music") {
+                if name == "dev" { self.cmd(Cmd::DevTools); return; }
+                if matches!(name.as_str(), "history" | "settings" | "ext" | "music" | "dev") {
                     self.panel = name.clone();
                     self.layout();
                     self.push_state();
@@ -1370,6 +1528,7 @@ impl App {
                 });
             }
             Cmd::ExtOpen { id } => match self.ext_page(&id) {
+                Some((u, _)) if id == "mmioliijnhnoblpgimnlajmefafdfilb" => self.new_tab(Some(u)),
                 Some((u, true)) => self.open_popup(&u),
                 Some((u, false)) => self.new_tab(Some(u)),
                 None => {
@@ -1405,6 +1564,14 @@ impl App {
                 let _ = self.window.drag_window();
             }
             Cmd::DetachTab { id, x, y } => {
+                if let Some(pid) = transfer::target(self.incognito, x, y) {
+                    if let Some(tab) = self.tabs.iter().find(|t| t.id == id) {
+                        if !self.transferring.contains_key(&id) && transfer::send(pid, id, &tab.url) {
+                            self.transferring.insert(id, Instant::now());
+                        }
+                    }
+                    return;
+                }
                 if self.tabs.len() > 1 {
                     let url = self.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone()).unwrap_or_default();
                     if let Ok(exe) = std::env::current_exe() {
@@ -1475,6 +1642,35 @@ impl App {
 
     fn handle(&mut self, ev: UserEvent) {
         match ev {
+            UserEvent::DevTarget(id, target) => {
+                if id == self.active && self.dev_open {
+                    match target.ok().and_then(|id| devtools::frontend_url(self.debug_port, &id)) {
+                        Some(url) => { let _ = self.dev.load_url(&url); },
+                        None => { let _ = self.dev.evaluate_script("window.devtoolsError('Не удалось подключить страницу. Используйте отдельный инспектор или перезапустите Lumen.')"); },
+                    }
+                }
+            },
+            UserEvent::DevResult(s) => { if let Ok(j) = serde_json::to_string(&s) { let _ = self.dev.evaluate_script(&format!("window.onDevResult({j})")); } },
+            UserEvent::Pulse => {
+                if !self.window.is_minimized() && !self.fullscreen {
+                    if let Ok(p) = self.window.inner_position() {
+                        transfer::publish(self.incognito, p.x, p.y, self.window.inner_size().width, (40.0 * self.window.scale_factor()) as u32);
+                    }
+                } else { transfer::cleanup(); }
+                transfer::receive(|u| { self.new_tab(if u.is_empty() { None } else { Some(u) }); self.window.set_focus(); });
+                let ids: Vec<_> = self.transferring.keys().copied().collect();
+                for id in ids {
+                    if transfer::acknowledged(id) {
+                        self.transferring.remove(&id);
+                        if self.tabs.len() == 1 { let _ = self.proxy.send_event(UserEvent::Quit); }
+                        else { self.cmd(Cmd::CloseTab { id }); }
+                    } else if self.transferring[&id].elapsed() > Duration::from_secs(5) {
+                        self.transferring.remove(&id);
+                        self.toast("Окно не ответило. Вкладка осталась здесь.");
+                    }
+                }
+            }
+            UserEvent::FullscreenChanged(id, full) => { if id == self.active { self.set_fullscreen(full); } },
             UserEvent::Ui(s) => match serde_json::from_str::<Cmd>(&s) {
                 Ok(c) => self.cmd(c),
                 Err(e) => log(|| format!("bad ui message: {e}")),
@@ -1608,20 +1804,27 @@ impl App {
             },
             UserEvent::ExtAdded(dir, id) => {
                 let msg = match id {
-                    Some(id) => {
+                    Ok(id) => {
                         if let Some(name) = dir.file_name().map(|n| n.to_string_lossy().to_string()) {
-                            self.ext_map.insert(id, name);
+                            let path = if dir.parent() == Some(self.ext_dir.as_path()) { name } else { dir.to_string_lossy().into_owned() };
+                            self.ext_map.insert(id, path);
                             if let Ok(j) = serde_json::to_string(&self.ext_map) {
                                 let _ = fs::write(&self.ext_map_path, j);
                             }
                         }
-                        "Расширение установлено"
+                        "Расширение установлено. Обновите открытые страницы.".to_string()
                     }
-                    None => "Не удалось добавить расширение (оно может не поддерживаться WebView2)",
+                    Err(e) => e,
                 };
                 let _ = self.proxy.send_event(UserEvent::ExtChanged(msg.to_string()));
             }
             UserEvent::Shortcut(sc) => match sc {
+                Shortcut::ZoomIn => self.cmd(Cmd::ZoomIn),
+                Shortcut::ZoomOut => self.cmd(Cmd::ZoomOut),
+                Shortcut::ZoomReset => self.cmd(Cmd::ZoomReset),
+                Shortcut::DevTools => self.cmd(Cmd::DevTools),
+                Shortcut::Fullscreen => self.cmd(Cmd::Fullscreen),
+                Shortcut::Escape => self.cmd(Cmd::Escape),
                 Shortcut::NewTab => self.new_tab(None),
                 Shortcut::Reopen => {
                     if let Some((u, _)) = self.closed.pop() {
@@ -1681,6 +1884,50 @@ impl App {
     }
 }
 
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+    #[test]
+    #[ignore = "Requires an interactive Windows desktop"]
+    fn animated_window_stays_visible_when_maximized_and_fullscreen() {
+        use tao::platform::windows::EventLoopBuilderExtWindows;
+        use windows::Win32::{Foundation::HWND, UI::WindowsAndMessaging::IsWindowVisible};
+        let event_loop = EventLoopBuilder::<()>::new().with_any_thread(true).build();
+        let window = WindowBuilder::new().with_title("Lumen fullscreen regression")
+            .with_decorations(false).with_visible(false)
+            .with_inner_size(tao::dpi::LogicalSize::new(640.0, 400.0)).build(&event_loop).unwrap();
+        animate_window(&window, true);
+        assert!(window.is_visible(), "tao still thinks the animated window is hidden");
+        window.set_maximized(true);
+        assert!(unsafe { IsWindowVisible(HWND(window.hwnd() as *mut _)).as_bool() });
+        for _ in 0..2 {
+            window.set_fullscreen(Some(tao::window::Fullscreen::Borderless(window.current_monitor())));
+            assert!(window.is_visible() && !window.is_minimized());
+            assert!(unsafe { IsWindowVisible(HWND(window.hwnd() as *mut _)).as_bool() });
+            window.set_fullscreen(None);
+            assert!(unsafe { IsWindowVisible(HWND(window.hwnd() as *mut _)).as_bool() });
+        }
+    }
+    #[test]
+    fn dock_fits_small_windows_and_scales_with_dpi() {
+        assert_eq!(dock_width(1280, 1.0, 400.0), 400);
+        assert_eq!(dock_width(2560, 2.0, 400.0), 800);
+        assert_eq!(dock_width(720, 1.5, 400.0), 360);
+        for width in [480, 640, 800, 1280, 3840] {
+            assert!(width - dock_width(width, 1.0, 620.0) >= 240);
+        }
+    }
+    #[test]
+    fn page_shortcuts_have_correct_modifiers() {
+        assert!(matches!(map_key(0xBB, true, true, false), Some(Shortcut::ZoomIn)));
+        assert!(matches!(map_key(0x30, true, false, false), Some(Shortcut::ZoomReset)));
+        assert!(matches!(map_key(0x49, true, true, false), Some(Shortcut::DevTools)));
+        assert!(matches!(map_key(0x7A, false, false, false), Some(Shortcut::Fullscreen)));
+        assert!(map_key(0x49, true, false, false).is_none());
+        assert!(map_key(0xBB, false, false, false).is_none());
+    }
+}
+
 #[derive(Default)]
 struct Cli {
     incognito: bool,
@@ -1733,19 +1980,21 @@ fn safe_url(u: &str) -> bool {
 
 /// Режим «всплывающего окна» расширения: маленькое окно без вкладок, закрывается при потере фокуса.
 fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: String, profile: PathBuf) {
+    let keep_open = url.starts_with("chrome-extension://mmioliijnhnoblpgimnlajmefafdfilb/");
     let event_loop = EventLoopBuilder::<()>::new().build();
     let icon = tao::window::Icon::from_rgba(ICON_RGBA.to_vec(), 64, 64).ok();
     let mut wb = WindowBuilder::new()
         .with_window_icon(icon)
         .with_title("Lumen — расширение")
         .with_inner_size(tao::dpi::LogicalSize::new(size.0, size.1))
-        .with_always_on_top(true);
+        .with_always_on_top(!keep_open);
     if let Some((x, y)) = pos {
         wb = wb.with_position(tao::dpi::PhysicalPosition::new(x, y));
     }
     let window = wb.build(&event_loop).expect("не удалось создать окно");
     let mut ctx = WebContext::new(Some(profile));
     let webview = WebViewBuilder::with_web_context(&mut ctx)
+        .with_initialization_script(include_str!("shazam-capture.js"))
         .with_devtools(false)
         .with_incognito(false)
         .with_browser_extensions_enabled(true)
@@ -1761,7 +2010,7 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
             match we {
                 WindowEvent::CloseRequested => *flow = ControlFlow::Exit,
                 WindowEvent::Focused(true) => was_focused = true,
-                WindowEvent::Focused(false) if was_focused => *flow = ControlFlow::Exit,
+                WindowEvent::Focused(false) if was_focused && !keep_open => *flow = ControlFlow::Exit,
                 _ => {}
             }
         }
@@ -1774,7 +2023,8 @@ fn main() {
     let secondary = cli.secondary;
 
     // профиль и настройки: %LOCALAPPDATA%\Lumen
-    let dir = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("Lumen");
+    let dir = std::env::var_os("LUMEN_DATA_DIR").map(PathBuf::from)
+        .unwrap_or_else(|| dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".")).join("Lumen"));
     let filters_dir = dir.join("filters");
     let lists_dir = filters_dir.join("lists");
     let ext_dir = dir.join("extensions");
@@ -1786,7 +2036,13 @@ fn main() {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    let args = browser_args(settings.eco);
+    let debugging_profile = if incognito { std::env::temp_dir().join(format!("Lumen-incognito-{}", std::process::id())) } else { dir.join("profile") };
+    let debug_port = devtools::port(&debugging_profile);
+    let args = browser_args(settings.eco, debug_port);
+    // WebView2 can ignore the debugging switch in per-controller options.
+    // Set it before creating any environment; only this process and its children
+    // inherit it, never the user's global Windows environment.
+    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", &args);
 
     if let Some(url) = cli.popup.clone().filter(|u| safe_url(u)) {
         run_popup(url, cli.size.unwrap_or((420.0, 620.0)), cli.pos, args, dir.join("profile"));
@@ -1843,6 +2099,11 @@ fn main() {
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    let pulse = proxy.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(200));
+        if pulse.send_event(UserEvent::Pulse).is_err() { break; }
+    });
 
     // таймер усыпления фоновых вкладок
     {
@@ -1872,16 +2133,34 @@ fn main() {
 
     let icon = tao::window::Icon::from_rgba(ICON_RGBA.to_vec(), 64, 64).ok();
     let mut wb = WindowBuilder::new()
+        .with_visible(false)
         .with_window_icon(icon)
         .with_decorations(false) // вкладки и кнопки окна рисует сам браузер
-        .with_title(if incognito { "Lumen — Инкогнито" } else { "Lumen" })
+        .with_title(if incognito { "Lumen 0.3 — Инкогнито" } else { "Lumen 0.3" })
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
-        .with_min_inner_size(tao::dpi::LogicalSize::new(640.0, 400.0));
+        .with_min_inner_size(tao::dpi::LogicalSize::new(480.0, 320.0));
     if let Some((x, y)) = cli.pos {
         wb = wb.with_position(tao::dpi::PhysicalPosition::new(x, y));
     }
     let window = wb.build(&event_loop).expect("не удалось создать окно");
-    window.set_undecorated_shadow(true);
+    if let Some(monitor) = window.current_monitor() {
+        let scale = window.scale_factor();
+        let screen = monitor.size();
+        window.set_inner_size(tao::dpi::LogicalSize::new(
+            (screen.width as f64 / scale * 0.92).min(1280.0).max(480.0),
+            (screen.height as f64 / scale * 0.86).min(800.0).max(320.0),
+        ));
+    }
+    window.set_undecorated_shadow(false);
+    unsafe {
+        // Suppress Windows 11's contrasting DWM border; older Windows ignore it.
+        let none = 0xfffffffeu32;
+        let _ = windows::Win32::Graphics::Dwm::DwmSetWindowAttribute(
+            windows::Win32::Foundation::HWND(window.hwnd() as *mut _),
+            windows::Win32::Graphics::Dwm::DWMWA_BORDER_COLOR,
+            &none as *const _ as *const _, std::mem::size_of::<u32>() as u32,
+        );
+    }
     window.set_background_color(Some(window_bg(&window, &settings.theme, incognito)));
 
     let mut ctx = WebContext::new(Some(profile_dir.clone()));
@@ -1906,7 +2185,47 @@ fn main() {
         .build_as_child(&window)
         .expect("не удалось создать панель интерфейса");
 
+    // Use the same native shortcuts in the toolbar and in page WebViews.
+    // Handling here prevents Ctrl+Shift+T falling through to UI's Ctrl+T.
+    let p_toolbar = proxy.clone();
+    let _ = hook::install_shortcuts(&ui, move |vk, ctrl, shift, alt| {
+        if vk == 0x1B { return false; } // panel Escape is handled by UI
+        if let Some(sc) = map_key(vk, ctrl, shift, alt) {
+            let _ = p_toolbar.send_event(UserEvent::Shortcut(sc));
+            true
+        } else { false }
+    });
+
+    let p_dev = proxy.clone();
+    let p_dev_ready = proxy.clone();
+    let p_dev_link = proxy.clone();
+    let dev = WebViewBuilder::with_web_context(&mut ctx)
+        .with_initialization_script(include_str!("devtools-theme.js"))
+        .with_navigation_handler(move |url| devtools::navigation_allowed(debug_port, &url))
+        .with_new_window_req_handler(move |url| {
+            if url.starts_with("https://") || url.starts_with("http://") { let _ = p_dev_link.send_event(UserEvent::NewTab(url)); }
+            false
+        })
+        .with_incognito(incognito)
+        .with_browser_extensions_enabled(!incognito)
+        .with_additional_browser_args(&args)
+        .with_html(DEV_HTML)
+        .with_visible(false)
+        .with_bounds(content_rect(&window))
+        .with_on_page_load_handler(move |ev, _| { if matches!(ev, PageLoadEvent::Finished) { let _ = p_dev_ready.send_event(UserEvent::Ui(r#"{"cmd":"ready"}"#.into())); } })
+        .with_ipc_handler(move |req: wry::http::Request<String>| { let _ = p_dev.send_event(UserEvent::Ui(req.body().clone())); })
+        .build_as_child(&window).expect("не удалось создать боковую панель");
+
     let mut app = App {
+        debug_port,
+        frame_dark: matches!(window.theme(), tao::window::Theme::Dark),
+        dev,
+        dev_open: false,
+        dev_width: 560.0,
+        fullscreen_keys: Arc::new(AtomicBool::new(false)),
+        transferring: HashMap::new(),
+        fullscreen: false,
+        zoom: HashMap::new(),
         window,
         ui,
         ctx,
@@ -1954,11 +2273,14 @@ fn main() {
         app.new_tab(None);
     }
     app.spawn_filters(false);
+    if std::env::var_os("LUMEN_TEST_HIDDEN").is_none() { animate_window(&app.window, true); }
 
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } | Event::UserEvent(UserEvent::Quit) => {
+                animate_window(&app.window, false);
+                transfer::cleanup();
                 if app.incognito {
                     app.tabs.clear();
                     schedule_cleanup(&app.profile_dir);
