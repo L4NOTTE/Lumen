@@ -352,7 +352,9 @@ enum UserEvent {
     Navigate(u32, String),
     Search(u32, String),
     NewTab(String),
-    BackgroundTab(String),
+    PopupTab(u32,String,bool),
+    PopupCommitted(u32),
+    PopupDownload(u32),
     Tick,
     FiltersBuilt(Arc<Filters>),
     FiltersStatus(String),
@@ -446,6 +448,8 @@ struct Tab {
 }
 
 struct App {
+    popup_tabs: HashMap<u32,(u32,bool)>,
+    download_hosts: Vec<WebView>,
     favicons: favicon::SharedCache,
     sent_icons: RefCell<std::collections::HashSet<String>>,
     downloads: crate::downloads::Shared,
@@ -757,7 +761,7 @@ impl App {
             })
             .with_new_window_req_handler(move |u: String| {
                 let middle=popup_gesture.take().is_some_and(|at|at.elapsed()<Duration::from_secs(5));
-                let _ = p_win.send_event(if middle {UserEvent::BackgroundTab(u)}else{UserEvent::NewTab(u)});
+                let _ = p_win.send_event(UserEvent::PopupTab(id,u,!middle));
                 false
             })
             .with_navigation_handler(move |u: String| {
@@ -831,6 +835,10 @@ impl App {
         };
         let wv = b.build_as_child(&self.window).expect("не удалось создать WebView2");
         let _ = crate::downloads::install(&wv, &self.downloads);
+        let committed=self.proxy.clone();let download=self.proxy.clone();
+        let _=hook::install_popup_outcome(&wv,
+            move||{let _=committed.send_event(UserEvent::PopupCommitted(id));},
+            move||{let _=download.send_event(UserEvent::PopupDownload(id));});
         let icon_proxy=self.proxy.clone();
         let _=favicon::install(&wv,&icon,&self.favicons,move||{let _=icon_proxy.send_event(UserEvent::FaviconsChanged);});
         let _=hook::install_link_gestures(&wv,gesture);
@@ -1394,6 +1402,7 @@ impl App {
             Cmd::Ready => { self.sent_icons.borrow_mut().clear(); self.last_ui_state.borrow_mut().clear(); self.push_state(); if self.panel=="downloads"{self.push_downloads();} },
             Cmd::NewTab => self.new_tab(None),
             Cmd::CloseTab { id } => {
+                self.popup_tabs.remove(&id);
                 if id == self.active && self.fullscreen { self.set_fullscreen(false); }
                 self.zoom.remove(&id);
                 if let Some(t) = self.tabs.iter().find(|t| t.id == id) {
@@ -1748,6 +1757,7 @@ impl App {
             UserEvent::FaviconsChanged => self.request_state(),
             UserEvent::DownloadPoll => {
                 let changed = self.downloads.borrow_mut().poll();
+                if self.downloads.borrow().active_count()==0 {self.download_hosts.clear();}
                 if changed {
                     let notice=self.downloads.borrow_mut().take_notice();
                     if let Some(text)=notice { self.toast(&text); }
@@ -1884,7 +1894,34 @@ impl App {
                 }
             }
             UserEvent::NewTab(u) => self.new_tab(Some(u)),
-            UserEvent::BackgroundTab(u) => self.create_tab(Some(u),false),
+            UserEvent::PopupTab(source,url,foreground) => {
+                if !safe_url(&url){return;}
+                let id=self.next_id;
+                self.create_tab(Some(url),false);
+                self.popup_tabs.insert(id,(source,foreground));
+            },
+            UserEvent::PopupCommitted(id)=>{
+                if let Some((source,foreground))=self.popup_tabs.remove(&id){
+                    if foreground&&self.active==source {self.activate(id);}
+                }
+            },
+            UserEvent::PopupDownload(id)=>{
+                if let Some((source,_))=self.popup_tabs.remove(&id){
+                    if let Some(index)=self.tabs.iter().position(|tab|tab.id==id){
+                        let mut tab=self.tabs.remove(index);
+                        if let Some(wv)=tab.webview.take(){
+                            let _=wv.set_visible(false);
+                            self.download_hosts.push(wv);
+                        }
+                        self.zoom.remove(&id);
+                        if self.active==id {
+                            if let Some(next)=self.tabs.iter().find(|t|t.id==source).or_else(||self.tabs.first()).map(|t|t.id){self.activate(next);}
+                            else {self.new_tab(None);}
+                        }
+                        self.layout();self.request_state();self.save_session();
+                    }
+                }
+            },
             UserEvent::Tick => {
                 let active = self.active;
                 let mut changed = false;
@@ -2382,7 +2419,7 @@ fn main() {
         .with_visible(false)
         .with_window_icon(icon)
         .with_decorations(false) // вкладки и кнопки окна рисует сам браузер
-        .with_title(format!("Lumen 0.4.6{}{}",if incognito {" — Инкогнито"} else {""},if developer {" — Режим разработчика (CDP)"} else {""}))
+        .with_title(format!("Lumen 0.4.7{}{}",if incognito {" — Инкогнито"} else {""},if developer {" — Режим разработчика (CDP)"} else {""}))
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(480.0, 320.0));
     if let Some((x, y)) = cli.pos {
@@ -2478,6 +2515,8 @@ fn main() {
     let download_proxy=proxy.clone();
     let downloads=crate::downloads::Manager::new(&dir,incognito,move||download_proxy.send_event(UserEvent::DownloadPoll).is_ok());
     let mut app = App {
+        popup_tabs: HashMap::new(),
+        download_hosts: Vec::new(),
         favicons:Rc::new(RefCell::new(favicon::Cache::default())),
         sent_icons:RefCell::new(std::collections::HashSet::new()),
         downloads,
