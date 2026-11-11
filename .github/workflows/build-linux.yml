@@ -1,0 +1,54 @@
+name: build-linux
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK and WebKitGTK development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libx11-dev libxrandr-dev libxkbcommon-dev libwayland-dev xvfb dbus-x11 dpkg-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Shared UI tests
+        run: node tools/test-shazam-capture.mjs
+      - name: Linux unit tests
+        run: cargo test --locked
+      - name: Build native Linux executable
+        run: cargo build --release --locked
+      - name: GTK and WebKit smoke test
+        env:
+          GDK_BACKEND: x11
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+        run: |
+          export LUMEN_DATA_DIR="$RUNNER_TEMP/lumen-linux-smoke"
+          mkdir -p "$LUMEN_DATA_DIR"
+          xvfb-run -a dbus-run-session -- timeout 45s ./target/release/lumen --smoke-test 2>&1 | tee linux-smoke.log
+          grep -q LUMEN_LINUX_SMOKE_OK linux-smoke.log
+      - name: Build deb and tar.gz packages
+        run: bash tools/package-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumen-linux-ubuntu24-amd64
+          if-no-files-found: error
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
+            dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: lumen-linux-diagnostics
+          if-no-files-found: ignore
+          path: linux-smoke.log
