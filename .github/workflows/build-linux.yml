@@ -5,25 +5,34 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Install GTK and WebKitGTK development libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libx11-dev libxrandr-dev libxkbcommon-dev libwayland-dev xvfb dbus-x11 dpkg-dev
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
       - name: Shared UI tests
         run: node tools/test-shazam-capture.mjs
+      - name: User installer contract
+        run: bash tools/test-install-linux.sh
       - name: Linux unit tests
         run: cargo test --locked
+      - name: Optimized GLib security regression
+        run: cargo test --release --locked glib_string_iterator_backport
       - name: Build native Linux executable
         run: cargo build --release --locked
       - name: GTK and WebKit smoke test
@@ -38,7 +47,7 @@ jobs:
           grep -q LUMEN_LINUX_SMOKE_OK linux-smoke.log
       - name: Build deb and tar.gz packages
         run: bash tools/package-linux.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: lumen-linux-ubuntu24-amd64
           if-no-files-found: error
@@ -46,7 +55,7 @@ jobs:
             dist/*.deb
             dist/*.tar.gz
             dist/SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: lumen-linux-diagnostics
