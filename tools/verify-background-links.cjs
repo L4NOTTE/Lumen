@@ -1,0 +1,27 @@
+const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),{spawn}=require('node:child_process');
+const sleep=n=>new Promise(r=>setTimeout(r,n));
+async function connect(t){const ws=new WebSocket(t.webSocketDebuggerUrl);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j});let next=0;const pending=new Map();ws.onmessage=e=>{const m=JSON.parse(e.data),p=pending.get(m.id);if(p){clearTimeout(p.timer);pending.delete(m.id);m.error?p.j(Error(JSON.stringify(m.error))):p.r(m.result)}};return {close:()=>ws.close(),call:(method,params={})=>new Promise((r,j)=>{const id=++next,timer=setTimeout(()=>{pending.delete(id);j(Error(method+' timeout'))},10000);pending.set(id,{r,j,timer});ws.send(JSON.stringify({id,method,params}))})};}
+(async()=>{
+ const [exe,dir]=process.argv.slice(2);fs.mkdirSync(dir,{recursive:true});if(fs.existsSync(path.join(dir,'settings.json')))throw Error('Use a fresh test profile');fs.writeFileSync(path.join(dir,'settings.json'),' {"adblock":false,"startup":"new"}');
+ const server=http.createServer((req,res)=>{res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});res.end(req.url==='/source'?`<!doctype html><title>Middle test</title><style>a{display:block;padding:18px;margin:8px}input{display:block}</style><a id="middle" href="/background"><span>Middle link</span></a><a id="foreground" href="/foreground" target="_blank">Foreground link</a><div id="shadow"></div><input id="typing"><script>const root=document.getElementById('shadow').attachShadow({mode:'closed'});root.innerHTML='<a href="/shadow-background" style="display:block;padding:18px">Closed shadow link</a>';window.closedRect=()=>{const b=root.querySelector('a').getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2}};</script>`:'<!doctype html><title>Destination</title><p>'+req.url+'</p>')});await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}`;
+ const app=spawn(exe,['--secondary','--',base+'/source'],{windowsHide:true,env:{...process.env,LUMEN_DATA_DIR:dir,LUMEN_TEST_HIDDEN:'1',LUMEN_ENABLE_CDP:'1'}});const clients=[];let ui,page,port;const results=[];
+ const evalJs=async(c,expression)=>(await c.call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true})).result?.value;
+ const check=(name,ok,details)=>{results.push({name,passed:!!ok,details});if(!ok)throw Error(name+': '+JSON.stringify(details))};
+ try{
+  for(let n=0;n<100&&(!ui||!page);n++){await sleep(100);try{port=Number(fs.readFileSync(path.join(dir,'profile','lumen-debug-port'),'utf8'));const ts=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();for(const t of ts.filter(t=>t.type==='page')){const c=await connect(t);if(!ui&&await evalJs(c,"typeof state!=='undefined'&&!!document.getElementById('devbtn')")){ui=c;clients.push(c)}else if(!page&&t.url===base+'/source'&&await evalJs(c,"!!document.getElementById('middle')")){page=c;clients.push(c)}else c.close()}}catch{}}
+  if(!ui||!page)throw Error('Browser test targets missing');
+  const before=await evalJs(ui,'({active:state.active,count:state.tabs.length})');const timeOrigin=await evalJs(page,'performance.timeOrigin');
+  async function click(expression,button){const p=await evalJs(page,expression);await page.call('Input.dispatchMouseEvent',{type:'mousePressed',x:p.x,y:p.y,button,buttons:button==='middle'?4:1,clickCount:1});await page.call('Input.dispatchMouseEvent',{type:'mouseReleased',x:p.x,y:p.y,button,buttons:0,clickCount:1});}
+  async function waitForCount(count){for(let n=0;n<80;n++){const s=await evalJs(ui,'({active:state.active,tabs:state.tabs})');if(s.tabs.length>=count&&s.tabs.at(-1).url)return s;await sleep(100)}throw Error('Tab not opened');}
+  await click("(()=>{const b=document.querySelector('#middle span').getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2}})()",'middle');
+  const middle=await waitForCount(before.count+1);await sleep(300);const count=await evalJs(ui,'state.tabs.length');
+  check('middle_click_opens_exactly_one_background_tab',middle.active===before.active&&count===before.count+1&&middle.tabs.at(-1).url===base+'/background',middle);
+  check('source_page_not_reloaded',await evalJs(page,'performance.timeOrigin')===timeOrigin,{});
+  const ts=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();const target=ts.find(t=>t.url===base+'/background');const bg=await connect(target);clients.push(bg);const visibility=await evalJs(bg,'document.visibilityState');check('new_background_view_is_hidden',visibility==='hidden',{visibility});
+  await click('window.closedRect()','middle');const shadow=await waitForCount(before.count+2);check('middle_click_in_closed_shadow_root',shadow.active===before.active&&shadow.tabs.at(-1).url===base+'/shadow-background',shadow);
+  await click("(()=>{const b=document.getElementById('foreground').getBoundingClientRect();return {x:b.x+b.width/2,y:b.y+b.height/2}})()",'left');
+  const foreground=await waitForCount(before.count+3);check('normal_target_blank_still_activates',foreground.active!==before.active&&foreground.tabs.at(-1).url===base+'/foreground',foreground);
+  await evalJs(ui,"window.ipc.postMessage(JSON.stringify({cmd:'win_close'}))").catch(()=>{});
+ }finally{for(const c of clients)c.close();await sleep(1000);if(app.exitCode===null)app.kill();server.close();fs.writeFileSync(path.join(dir,'background-links-results.json'),JSON.stringify(results,null,2));}
+ console.log(JSON.stringify(results,null,2));
+})().catch(e=>{console.error(e);process.exitCode=1});

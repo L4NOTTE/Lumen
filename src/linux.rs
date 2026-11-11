@@ -25,7 +25,20 @@ use wry::{
 };
 
 const BAR: f64 = 80.0;
-const UI: &str = include_str!("../ui/ui.html");
+#[cfg(test)]
+mod hardening_tests {
+    #[test]
+    fn glib_string_iterator_backport() {
+        use gtk::glib::variant::ToVariant;
+        let value = vec!["alpha", "beta", "gamma"].to_variant();
+        let mut iter = value.array_iter_str().unwrap();
+        assert_eq!(iter.next(), Some("alpha"));
+        assert_eq!(iter.next_back(), Some("gamma"));
+        assert_eq!(iter.last(), Some("beta"));
+        assert_eq!(value.array_iter_str().unwrap().nth(1),Some("beta"));
+    }
+}
+const UI: &str = include_str!(concat!(env!("OUT_DIR"),"/ui.html"));
 const NEWTAB: &str = include_str!("../ui/newtab.html");
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -76,6 +89,7 @@ struct Session {
     tabs: Vec<Link>,
 }
 enum Msg {
+    DownloadPoll,
     Ui(Value),
     Title(u32, String),
     Load(u32, String, bool),
@@ -94,6 +108,7 @@ struct Tab {
     zoom: f64,
 }
 struct App {
+    downloads: crate::downloads::Shared,
     window: Window,
     root: gtk::Box,
     chrome: gtk::Box,
@@ -205,11 +220,8 @@ fn read<T: serde::de::DeserializeOwned + Default>(path: PathBuf) -> T {
 }
 fn write<T: Serialize>(path: PathBuf, value: &T) {
     if let Ok(data) = serde_json::to_vec_pretty(value) {
-        let temp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-        if fs::write(&temp, data).is_ok() {
-            if let Err(e) = fs::rename(&temp, &path) {
-                eprintln!("Lumen: cannot save {}: {e}", path.display());
-            }
+        if let Err(error) = crate::security::atomic_write(&path,&data) {
+            eprintln!("Lumen: cannot save {}: {error}",path.display());
         }
     }
 }
@@ -376,6 +388,7 @@ impl App {
         };
         self.stack.add_named(&container, &format!("tab-{id}"));
         container.show_all();
+        crate::downloads::install(&wv, &self.downloads);
         let native = wv.webview();
         let p = self.proxy.clone();
         native.connect_zoom_level_notify(move |w| {
@@ -491,12 +504,19 @@ impl App {
         let c = &self.config;
         let (al, ad) = accent(&c.accent);
         let tabs:Vec<_>=self.tabs.iter().map(|t|json!({"id":t.id,"title":t.title,"url":t.url,"loading":t.loading,"sleeping":false})).collect();
-        let s=json!({"platform":"linux","version":env!("CARGO_PKG_VERSION"),"tabs":tabs,"active":self.active,"zoom":self.tab().map(|t|(t.zoom*100.0).round()).unwrap_or(100.0),"panel":self.panel,"dev_open":self.dev,"maximized":self.window.is_maximized(),"incognito":self.private,"engine":c.engine,"adblock":c.adblock,
+        let s=json!({"download_count":self.downloads.borrow().active_count(),"platform":"linux","version":env!("CARGO_PKG_VERSION"),"tabs":tabs,"active":self.active,"zoom":self.tab().map(|t|(t.zoom*100.0).round()).unwrap_or(100.0),"panel":self.panel,"dev_open":self.dev,"maximized":self.window.is_maximized(),"incognito":self.private,"engine":c.engine,"adblock":c.adblock,
           "set":{"theme":c.theme,"accent":c.accent,"font":c.font,"font_size":c.font_size,"bg_mode":c.bg_mode,"has_bg":c.background.is_some(),"startup":c.startup,"labels":c.hide_labels,"sleep":0,"eco":false},"look":{"al":al,"ad":ad,"font":font(&c.font),"fs":font_size(&c.font_size)},"filters":{"level":"basic","status":"Базовая блокировка и скрытие рекламных карточек. Некоторые объявления могут сохраняться."},"block":{"count":0,"recent":[]},"music_cfg":{"token":"","source":"system"}}).to_string();
         if s != self.last_state {
             let _ = self.ui.evaluate_script(&format!("window.onState({s})"));
             self.last_state = s;
         }
+    }
+    fn push_downloads(&self) {
+        let data = serde_json::to_string(self.downloads.borrow().records())
+            .unwrap_or_else(|_| "[]".into());
+        let _ = self
+            .ui
+            .evaluate_script(&format!("window.onDownloads({data})"));
     }
     fn refresh_newtabs(&mut self) {
         let html = self.newtab();
@@ -566,6 +586,9 @@ impl App {
             "ready" => {
                 self.last_state.clear();
                 self.push();
+                if self.panel == "downloads" {
+                    self.push_downloads();
+                }
                 if self.smoke && !self.smoke_started {
                     self.smoke_started = true;
                     self.open(None);
@@ -584,6 +607,18 @@ impl App {
                     std::process::exit(1)
                 }
             }
+            "download_action" => {
+                self.downloads
+                    .borrow_mut()
+                    .action(&text("id"), &text("action"));
+                self.push_downloads();
+                self.push();
+            }
+            "clear_downloads" => {
+                self.downloads.borrow_mut().clear();
+                self.push_downloads();
+            }
+            "downloads_folder" => self.downloads.borrow().open_folder(),
             "new_tab" => self.open(None),
             "switch" => self.activate(id),
             "close_tab" => {
@@ -680,6 +715,9 @@ impl App {
                     return;
                 }
                 self.panel = panel;
+                if self.panel == "downloads" {
+                    self.push_downloads();
+                }
                 if self.panel == "history" {
                     let _ = self
                         .ui
@@ -756,15 +794,7 @@ impl App {
             }
             "set_background" => {
                 let data = text("data");
-                if data.len() < 4_000_000
-                    && [
-                        "data:image/png;base64,",
-                        "data:image/jpeg;base64,",
-                        "data:image/webp;base64,",
-                    ]
-                    .iter()
-                    .any(|p| data.starts_with(p))
-                {
+                if crate::security::image_data(&data) {
                     self.config.background = Some(data);
                     self.config.bg_mode = "custom".into();
                     self.save();
@@ -889,6 +919,19 @@ impl App {
     }
     fn event(&mut self, msg: Msg) {
         match msg {
+            Msg::DownloadPoll => {
+                let changed = self.downloads.borrow_mut().poll();
+                if changed {
+                    let notice = self.downloads.borrow_mut().take_notice();
+                    if let Some(text) = notice {
+                        self.toast(&text);
+                    }
+                    if self.panel == "downloads" {
+                        self.push_downloads();
+                    }
+                    self.push();
+                }
+            }
             Msg::Ui(v) => self.command(v),
             Msg::Title(id, title) => {
                 if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
@@ -997,6 +1040,8 @@ fn key_command(event: &gdk::EventKey) -> Option<Value> {
         "reload"
     } else if ctrl && shift && (key == k::n || key == k::N) {
         "incognito"
+    } else if ctrl && (key == k::j || key == k::J) {
+        return Some(json!({"cmd":"open_panel","name":"downloads"}));
     } else if ctrl && (key == k::h || key == k::H) {
         return Some(json!({"cmd":"open_panel","name":"history"}));
     } else {
@@ -1015,7 +1060,7 @@ pub fn run() {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("lumen")
         });
-    let _ = fs::create_dir_all(&dir);
+    crate::security::private_directory(&dir).expect("private settings directory");
     let config: Config = read(dir.join("settings.json"));
     let links: Vec<Link> = read(dir.join("links.json"));
     let history = if private {
@@ -1079,14 +1124,21 @@ pub fn run() {
     } else {
         profile
     };
+    if let Some(path) = &profile { crate::security::private_directory(path).expect("private WebKit profile"); }
     let mut ctx = WebContext::new(profile);
     let p = proxy.clone();
     let ui = WebViewBuilder::with_web_context(&mut ctx)
         .with_incognito(private)
         .with_html(UI)
         .with_bounds(rect(0.0, 0.0, 1200.0, BAR))
-        .with_navigation_handler(|u| u.starts_with("about:") || u.starts_with("data:text/html"))
+        .with_navigation_handler(|u| crate::security::internal_document(&u, UI))
+        .with_new_window_req_handler(|_| false)
         .with_ipc_handler(move |request| {
+            if request.body().len() > crate::security::MAX_IPC
+                || !crate::security::internal_document(&request.uri().to_string(), UI)
+            {
+                return;
+            }
             if let Ok(v) = serde_json::from_str(request.body()) {
                 let _ = p.send_event(Msg::Ui(v));
             }
@@ -1105,7 +1157,12 @@ pub fn run() {
             }
         });
     let blocker = Rc::new(Blocker::load(&dir.join("filters")));
+    let download_proxy = proxy.clone();
+    let downloads = crate::downloads::Manager::new(&dir, private, move || {
+        download_proxy.send_event(Msg::DownloadPoll).is_ok()
+    });
     let mut app = App {
+        downloads,
         window,
         root,
         chrome,

@@ -1,12 +1,7 @@
 //! Усиленный блокировщик: движок Brave `adblock` (синтаксис EasyList / uBlock / AdGuard).
 //! Списки скачиваются в фоне и кэшируются на диске.
 
-use std::{
-    collections::HashSet,
-    fs,
-    path::Path,
-    time::Duration,
-};
+use std::{collections::HashSet, fs, path::Path, time::Duration};
 
 use adblock::{
     lists::{FilterSet, ParseOptions},
@@ -47,6 +42,8 @@ pub const LISTS: &[(&str, &[&str])] = &[
     ),
 ];
 
+const MAX_LIST: usize = 8 * 1024 * 1024;
+const MAX_COMBINED: u64 = 32 * 1024 * 1024;
 const REFRESH_AFTER: Duration = Duration::from_secs(3 * 24 * 3600);
 
 pub struct Filters {
@@ -67,7 +64,15 @@ impl Filters {
         let mut set = FilterSet::new(false);
         let mut rules = 0usize;
         let mut any = false;
+        let mut combined = 0u64;
         let mut add = |path: &Path| {
+            let Ok(size) = fs::metadata(path).map(|m| m.len()) else {
+                return;
+            };
+            if size > MAX_LIST as u64 || combined.saturating_add(size) > MAX_COMBINED {
+                return;
+            }
+            combined += size;
             if let Ok(text) = fs::read_to_string(path) {
                 rules += text
                     .lines()
@@ -81,7 +86,7 @@ impl Filters {
             add(&lists_dir.join(format!("{name}.txt")));
         }
         if let Ok(rd) = fs::read_dir(user_dir) {
-            for e in rd.flatten() {
+            for e in rd.flatten().take(32) {
                 let p = e.path();
                 if p.extension().and_then(|x| x.to_str()) == Some("txt") {
                     add(&p);
@@ -91,11 +96,16 @@ impl Filters {
         if !any {
             return None;
         }
-        Some(Filters { engine: Engine::new_with_filter_set(set), rules })
+        Some(Filters {
+            engine: Engine::new_with_filter_set(set),
+            rules,
+        })
     }
 
     pub fn should_block(&self, url: &str, source: &str, rtype: &str) -> bool {
-        let Ok(req) = Request::new(url, source, rtype, "get") else { return false };
+        let Ok(req) = Request::new(url, source, rtype, "get") else {
+            return false;
+        };
         let r = self.engine.check_network_request(&req);
         r.filter.is_some() && (r.exception.is_none() || r.important)
     }
@@ -110,38 +120,72 @@ impl Filters {
         }
     }
 
-    pub fn generic(&self, classes: &[String], ids: &[String], exceptions: &HashSet<String>) -> Vec<String> {
-        self.engine.hidden_class_id_selectors(classes, ids, exceptions)
+    pub fn generic(
+        &self,
+        classes: &[String],
+        ids: &[String],
+        exceptions: &HashSet<String>,
+    ) -> Vec<String> {
+        self.engine
+            .hidden_class_id_selectors(classes, ids, exceptions)
     }
 }
 
 fn fetch(url: &str, tmp: &Path) -> Option<String> {
     let ok = crate::sys::curl_download(url, tmp);
-    let text = if ok { fs::read(tmp).ok().map(|b| String::from_utf8_lossy(&b).into_owned()) } else { None };
+    let text = if ok && fs::metadata(tmp).is_ok_and(|m| m.len() <= MAX_LIST as u64) {
+        fs::read(tmp)
+            .ok()
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+    } else {
+        None
+    };
     let _ = fs::remove_file(tmp);
     text
 }
 
 /// Разворачивает строки `%include файл%` (так устроен RU AdList на GitHub).
-fn expand_includes(text: String, base: &str, tmp: &Path, depth: u8) -> String {
+fn expand_includes(
+    text: String,
+    base: &str,
+    tmp: &Path,
+    depth: u8,
+    budget: &mut usize,
+) -> Option<String> {
+    if text.len() > MAX_LIST {
+        return None;
+    }
     if depth == 0 || !text.contains("%include ") {
-        return text;
+        return Some(text);
     }
     let mut out = String::with_capacity(text.len());
     for line in text.lines() {
-        if let Some(name) = line.trim().strip_prefix("%include ").and_then(|r| r.strip_suffix('%')) {
-            if let Some(inc) = fetch(&format!("{base}{}", name.trim()), tmp) {
-                out.push_str(&expand_includes(inc, base, tmp, depth - 1));
-                out.push('\n');
+        if let Some(name) = line
+            .trim()
+            .strip_prefix("%include ")
+            .and_then(|r| r.strip_suffix('%'))
+        {
+            if *budget == 0 {
+                return None;
             }
-            continue;
+            *budget -= 1;
+            let inc = fetch(&format!("{base}{}", name.trim()), tmp)?;
+            let inc = expand_includes(inc, base, tmp, depth - 1, budget)?;
+            if out.len().saturating_add(inc.len() + 1) > MAX_LIST {
+                return None;
+            }
+            out.push_str(&inc);
+            out.push('\n');
+        } else {
+            if out.len().saturating_add(line.len() + 1) > MAX_LIST {
+                return None;
+            }
+            out.push_str(line);
+            out.push('\n');
         }
-        out.push_str(line);
-        out.push('\n');
     }
-    out
+    Some(out)
 }
-
 /// Скачивает устаревшие списки. Возвращает число обновлённых.
 pub fn update_lists(dir: &Path, force: bool) -> usize {
     let _ = fs::create_dir_all(dir);
@@ -160,9 +204,13 @@ pub fn update_lists(dir: &Path, force: bool) -> usize {
         }
         let tmp = dir.join(format!("{name}.tmp"));
         for url in *urls {
-            let Some(text) = fetch(url, &tmp) else { continue };
+            let Some(text) = fetch(url, &tmp) else {
+                continue;
+            };
             let base = &url[..url.rfind('/').map(|i| i + 1).unwrap_or(url.len())];
-            let text = expand_includes(text, base, &tmp, 2);
+            let Some(text) = expand_includes(text, base, &tmp, 2, &mut 16) else {
+                continue;
+            };
             if text.len() > 10_000 {
                 let part = dir.join(format!("{name}.part"));
                 if fs::write(&part, text).is_ok() && fs::rename(&part, &path).is_ok() {
@@ -186,4 +234,29 @@ pub fn selectors_to_css<'a>(sels: impl IntoIterator<Item = &'a String>) -> Strin
         css.push_str("{display:none!important}\n");
     }
     css
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    #[test]
+    fn oversized_lists_and_exhausted_includes_fail_closed() {
+        let path = Path::new("unused");
+        assert!(expand_includes(
+            "a".repeat(MAX_LIST + 1),
+            "https://example.com/",
+            path,
+            2,
+            &mut 16
+        )
+        .is_none());
+        assert!(expand_includes(
+            "%include file%".into(),
+            "https://example.com/",
+            path,
+            2,
+            &mut 0
+        )
+        .is_none());
+    }
 }

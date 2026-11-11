@@ -6,6 +6,9 @@
 #[cfg(target_os = "windows")]
 include!("windows_main.rs");
 
+mod downloads;
+mod security;
+
 #[cfg(target_os = "linux")]
 mod blocker;
 #[cfg(target_os = "linux")]

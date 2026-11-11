@@ -12,9 +12,8 @@ use std::{
 };
 
 use webview2_com::{
-    take_pwstr,
-    Microsoft::Web::WebView2::Win32::*,
-    AcceleratorKeyPressedEventHandler, TrySuspendCompletedHandler, WebResourceRequestedEventHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler, Microsoft::Web::WebView2::Win32::*,
+    TrySuspendCompletedHandler, WebResourceRequestedEventHandler,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT};
 use windows_core::{Interface, HSTRING, PWSTR};
@@ -22,33 +21,88 @@ use wry::{WebView, WebViewExtWindows};
 
 use crate::filters::Filters;
 
+pub fn install_link_gestures(
+    wv: &WebView,
+    gesture: Rc<std::cell::Cell<Option<std::time::Instant>>>,
+) -> windows_core::Result<()> {
+    unsafe {
+        let mut token = Default::default();
+        wv.controller().CoreWebView2()?.add_WebMessageReceived(
+            &webview2_com::WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut text = PWSTR::null();
+                args.TryGetWebMessageAsString(&mut text)?;
+                let text = take_pwstr(text);
+                if text.len() > 1024 {
+                    return Ok(());
+                }
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if value["kind"] == "lumen-link-gesture" {
+                        gesture.set(if value["middle"] == true {
+                            Some(std::time::Instant::now())
+                        } else {
+                            None
+                        });
+                    }
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
+    Ok(())
+}
 /// Replace the native floating inspector command while retaining the browser menu.
-pub fn install_inspect(wv: &WebView, inspect: impl Fn(i32, i32) + 'static) -> windows_core::Result<()> {
+pub fn install_inspect(
+    wv: &WebView,
+    inspect: impl Fn(i32, i32) + 'static,
+) -> windows_core::Result<()> {
     unsafe {
         let core = wv.controller().CoreWebView2()?;
-        let env = core.cast::<ICoreWebView2_2>()?.Environment()?.cast::<ICoreWebView2Environment9>()?;
+        let env = core
+            .cast::<ICoreWebView2_2>()?
+            .Environment()?
+            .cast::<ICoreWebView2Environment9>()?;
         let inspect = Rc::new(inspect);
         let mut token = Default::default();
         core.cast::<ICoreWebView2_11>()?.add_ContextMenuRequested(
             &webview2_com::ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
                 if let Some(args) = args {
                     let items = args.MenuItems()?;
-                    let mut count = 0; items.Count(&mut count)?;
+                    let mut count = 0;
+                    items.Count(&mut count)?;
                     for i in (0..count).rev() {
                         let item = items.GetValueAtIndex(i)?;
-                        let mut name = PWSTR::null(); item.Name(&mut name)?;
-                        if take_pwstr(name) == "inspectElement" { items.RemoveValueAtIndex(i)?; }
+                        let mut name = PWSTR::null();
+                        item.Name(&mut name)?;
+                        if take_pwstr(name) == "inspectElement" {
+                            items.RemoveValueAtIndex(i)?;
+                        }
                     }
-                    let mut point = windows::Win32::Foundation::POINT::default(); args.Location(&mut point)?;
-                    let item = env.CreateContextMenuItem(&HSTRING::from("Проверить"), None, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND)?;
-                    let callback = inspect.clone(); let mut selected = Default::default();
-                    item.add_CustomItemSelected(&webview2_com::CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
-                        callback(point.x, point.y); Ok(())
-                    })), &mut selected)?;
-                    items.Count(&mut count)?; items.InsertValueAtIndex(count, &item)?;
+                    let mut point = windows::Win32::Foundation::POINT::default();
+                    args.Location(&mut point)?;
+                    let item = env.CreateContextMenuItem(
+                        &HSTRING::from("Проверить"),
+                        None,
+                        COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
+                    )?;
+                    let callback = inspect.clone();
+                    let mut selected = Default::default();
+                    item.add_CustomItemSelected(
+                        &webview2_com::CustomItemSelectedEventHandler::create(Box::new(
+                            move |_, _| {
+                                callback(point.x, point.y);
+                                Ok(())
+                            },
+                        )),
+                        &mut selected,
+                    )?;
+                    items.Count(&mut count)?;
+                    items.InsertValueAtIndex(count, &item)?;
                 }
                 Ok(())
-            })), &mut token,
+            })),
+            &mut token,
         )?;
     }
     Ok(())
@@ -57,30 +111,46 @@ pub fn install_inspect(wv: &WebView, inspect: impl Fn(i32, i32) + 'static) -> wi
 /// Native WebView2 Ctrl+wheel, with zoom state reported back to Rust.
 pub fn install_zoom(wv: &WebView, changed: impl Fn(f64) + 'static) -> windows_core::Result<()> {
     unsafe {
-        let controller=wv.controller();
-        controller.CoreWebView2()?.Settings()?.SetIsZoomControlEnabled(true)?;
-        let mut token=Default::default();
-        controller.add_ZoomFactorChanged(&webview2_com::ZoomFactorChangedEventHandler::create(Box::new(move |sender,_| {
-            if let Some(controller)=sender { let mut zoom=1.0;controller.ZoomFactor(&mut zoom)?;changed(zoom); }
-            Ok(())
-        })), &mut token)?;
+        let controller = wv.controller();
+        controller
+            .CoreWebView2()?
+            .Settings()?
+            .SetIsZoomControlEnabled(true)?;
+        let mut token = Default::default();
+        controller.add_ZoomFactorChanged(
+            &webview2_com::ZoomFactorChangedEventHandler::create(Box::new(move |sender, _| {
+                if let Some(controller) = sender {
+                    let mut zoom = 1.0;
+                    controller.ZoomFactor(&mut zoom)?;
+                    changed(zoom);
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
     }
     Ok(())
 }
 
-pub fn install_fullscreen(wv: &WebView, changed: impl Fn(bool) + 'static) -> windows_core::Result<()> {
+pub fn install_fullscreen(
+    wv: &WebView,
+    changed: impl Fn(bool) + 'static,
+) -> windows_core::Result<()> {
     unsafe {
         let core = wv.controller().CoreWebView2()?;
         let mut token = Default::default();
         core.add_ContainsFullScreenElementChanged(
-            &webview2_com::ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
-                if let Some(sender) = sender {
-                    let mut full = windows::Win32::Foundation::BOOL::default();
-                    sender.ContainsFullScreenElement(&mut full)?;
-                    changed(full.as_bool());
-                }
-                Ok(())
-            })), &mut token,
+            &webview2_com::ContainsFullScreenElementChangedEventHandler::create(Box::new(
+                move |sender, _| {
+                    if let Some(sender) = sender {
+                        let mut full = windows::Win32::Foundation::BOOL::default();
+                        sender.ContainsFullScreenElement(&mut full)?;
+                        changed(full.as_bool());
+                    }
+                    Ok(())
+                },
+            )),
+            &mut token,
         )?;
     }
     Ok(())
@@ -97,7 +167,10 @@ pub struct Stats {
 
 impl Stats {
     pub fn new() -> Self {
-        Self { count: AtomicU64::new(0), recent: Mutex::new(VecDeque::new()) }
+        Self {
+            count: AtomicU64::new(0),
+            recent: Mutex::new(VecDeque::new()),
+        }
     }
 
     pub fn add(&self, url: &str) {
@@ -162,12 +235,19 @@ pub fn install_blocker(
                 }
                 if basic.is_blocked(&url) {
                     stats.add(&url);
-                    let response=env.CreateWebResourceResponse(None,403,&HSTRING::from("Blocked"),&HSTRING::from("Content-Type: text/plain"))?;
+                    let response = env.CreateWebResourceResponse(
+                        None,
+                        403,
+                        &HSTRING::from("Blocked"),
+                        &HSTRING::from("Content-Type: text/plain"),
+                    )?;
                     args.SetResponse(&response)?;
                     return Ok(());
                 }
                 let guard = filters.borrow();
-                let Some(f) = guard.as_ref() else { return Ok(()) };
+                let Some(f) = guard.as_ref() else {
+                    return Ok(());
+                };
                 let page_url = page.borrow().clone();
                 if page_url.is_empty() {
                     return Ok(());
@@ -257,7 +337,12 @@ pub fn install_shortcuts(
                 let mut vk = 0u32;
                 args.VirtualKey(&mut vk)?;
                 let down = |k: i32| GetKeyState(k) < 0;
-                if on_key(vk, down(VK_CONTROL.0 as i32), down(VK_SHIFT.0 as i32), down(VK_MENU.0 as i32)) {
+                if on_key(
+                    vk,
+                    down(VK_CONTROL.0 as i32),
+                    down(VK_SHIFT.0 as i32),
+                    down(VK_MENU.0 as i32),
+                ) {
                     args.SetHandled(true)?;
                 }
                 Ok(())

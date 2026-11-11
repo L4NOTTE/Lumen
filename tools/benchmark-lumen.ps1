@@ -35,7 +35,7 @@ function Action($cmd,$condition){
 }
 New-Item -ItemType Directory -Path $DataDirectory -Force|Out-Null
 [IO.File]::WriteAllText((Join-Path $DataDirectory 'settings.json'),'{"adblock":false,"startup":"new","sleep_minutes":0}')
-$env:LUMEN_DATA_DIR=$DataDirectory;$env:LUMEN_TEST_HIDDEN='1'
+$env:LUMEN_DATA_DIR=$DataDirectory;$env:LUMEN_TEST_HIDDEN='1';$env:LUMEN_ENABLE_CDP='1'
 $clock=[Diagnostics.Stopwatch]::StartNew();$app=Start-Process -FilePath $Executable -ArgumentList '--secondary' -WindowStyle Hidden -PassThru
 try{
  $ui=$null

@@ -18,6 +18,7 @@ pub fn port(profile: &Path) -> u16 {
 }
 
 pub fn frontend_url(port: u16, target: &str) -> Option<String> {
+    if port == 0 { return None; }
     if target.is_empty() || !target.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') { return None; }
     Some(format!("http://127.0.0.1:{port}/devtools/inspector.html?ws=127.0.0.1:{port}/devtools/page/{target}&panel=elements"))
 }

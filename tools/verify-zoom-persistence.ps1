@@ -11,7 +11,7 @@ $node=(Get-Command node).Source
 $server=Start-Process -FilePath $node -ArgumentList ('"'+$serverScript+'" "'+$portFile+'"') -WindowStyle Hidden -PassThru
 $script:app=$null
 function Start-TestBrowser([bool]$Private=$false){
- $env:LUMEN_DATA_DIR=$DataDirectory;$env:LUMEN_TEST_HIDDEN='1'
+ $env:LUMEN_DATA_DIR=$DataDirectory;$env:LUMEN_TEST_HIDDEN='1';$env:LUMEN_ENABLE_CDP='1'
  $arguments=@('--secondary','--url',"$site1/one");if($Private){$arguments+='--incognito'}
  $script:app=Start-Process -FilePath $Executable -ArgumentList $arguments -WindowStyle Hidden -PassThru
  $script:ui=$null
