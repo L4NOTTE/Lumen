@@ -40,7 +40,9 @@ impl Blocker {
                 if p.extension().and_then(|x| x.to_str()) != Some("txt") {
                     continue;
                 }
-                let Ok(text) = fs::read_to_string(&p) else { continue };
+                let Ok(text) = fs::read_to_string(&p) else {
+                    continue;
+                };
                 for line in text.lines() {
                     parse_line(line.trim(), &mut hosts, &mut css);
                 }
@@ -50,8 +52,14 @@ impl Blocker {
         let mut list: Vec<&String> = hosts.iter().collect();
         list.sort();
         let script = include_str!("inject.js")
-            .replace("__HOSTS__", &serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()))
-            .replace("__CSS__", &serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".into()));
+            .replace(
+                "__HOSTS__",
+                &serde_json::to_string(&list).unwrap_or_else(|_| "[]".into()),
+            )
+            .replace(
+                "__CSS__",
+                &serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".into()),
+            );
 
         Self { hosts, script }
     }
@@ -62,8 +70,12 @@ impl Blocker {
     }
 
     pub fn is_blocked(&self, url: &str) -> bool {
-        let Ok(u) = url::Url::parse(url) else { return false };
-        let Some(mut h) = u.host_str() else { return false };
+        let Ok(u) = url::Url::parse(url) else {
+            return false;
+        };
+        let Some(mut h) = u.host_str() else {
+            return false;
+        };
         loop {
             if self.hosts.contains(h) {
                 return true;
@@ -114,7 +126,7 @@ fn parse_line(l: &str, hosts: &mut HashSet<String>, css: &mut String) {
 mod yandex_tests {
     #[test]
     fn ads_are_blocked_without_blocking_weather_or_static_assets() {
-        let blocker=super::Blocker::load(std::path::Path::new("__no_custom_filters__"));
+        let blocker = super::Blocker::load(std::path::Path::new("__no_custom_filters__"));
         assert!(blocker.is_blocked("https://yabs.yandex.ru/count/example"));
         assert!(blocker.is_blocked("https://an.yandex.ru/meta/example"));
         assert!(!blocker.is_blocked("https://yandex.ru/pogoda/"));

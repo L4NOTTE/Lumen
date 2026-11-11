@@ -188,6 +188,14 @@ button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outl
 .wc .wx:hover{color:var(--fg)!important}.chip:hover{background:var(--bg);border-color:var(--line)}
 .seg button:hover,.segx button:hover{background:transparent}
 .seg button.on:hover,.segx button.on:hover{background:var(--acc);color:#fff}
+</style><style>
+html[data-platform="linux"] [data-platform-only="windows"],
+html[data-platform="linux"] .wc,html[data-platform="linux"] .resize,html[data-platform="linux"] #extbtn,
+html[data-platform="linux"] #updf,html[data-platform="linux"] .segx[data-x="level"],
+html[data-platform="linux"] #bstat,html[data-platform="linux"] #blog,
+html[data-platform="linux"] h3:has(+ #bstat),
+html[data-platform="linux"] .grp:has(.segx[data-x="sleep"]),
+html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important}
 </style></head>
 <body>
   <div class="resize n" data-resize="n"></div><div class="resize ne" data-resize="ne"></div><div class="resize nw" data-resize="nw"></div><div class="resize e" data-resize="e"></div><div class="resize w" data-resize="w"></div>
@@ -321,7 +329,7 @@ button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outl
 
       <div class="grp"><h3>При запуске</h3>
         <div class="segx" data-x="startup"><button data-v="restore">Вернуть открытые вкладки</button><button data-v="new">Новая вкладка</button></div>
-        <div class="hint">Вернуть вкладки: откроется то, что было в прошлый раз (загружается только активная вкладка, остальные ждут своего часа и не тратят память).</div>
+        <div class="hint" data-platform-only="windows">Вернуть вкладки: откроется то, что было в прошлый раз (загружается только активная вкладка, остальные ждут своего часа и не тратят память).</div>
       </div>
 
       <div class="grp"><h3>Блокировка рекламы</h3>
@@ -334,7 +342,7 @@ button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outl
         <h3 style="margin-top:16px">Что заблокировано</h3>
         <div class="hint" id="bstat" style="margin-top:0"></div>
         <div class="blog" id="blog"></div>
-        <div class="hint">Усиленная: списки EasyList, RU AdList, AdGuard Russian и uBlock проверяют каждый запрос страницы и скрывают пустые рекламные места.
+        <div class="hint" data-platform-only="windows">Усиленная: списки EasyList, RU AdList, AdGuard Russian и uBlock проверяют каждый запрос страницы и скрывают пустые рекламные места.
           Занимает больше памяти (десятки МБ). Базовая: лёгкий встроенный список доменов.</div>
       </div>
 
@@ -565,6 +573,7 @@ window.onHistory = (list) => { hist = list; renderHist(); };
 
 // ---------- состояние ----------
 window.onState = (s) => {
+  document.documentElement.dataset.platform = s.platform || 'windows';
   const previous = state;
   state = s;
   document.body.classList.toggle('maximized',s.maximized);
@@ -625,7 +634,7 @@ window.onState = (s) => {
 
   // блокировка рекламы и распознавание музыки
   document.querySelectorAll('.segx[data-x="level"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.filters.level));
-  $('fstat').textContent = s.filters.level === 'strong' ? s.filters.status : 'Базовый режим: встроенный список доменов, без загрузки фильтров.';
+  $('fstat').textContent = s.platform === 'linux' ? s.filters.status : s.filters.level === 'strong' ? s.filters.status : 'Базовый режим: встроенный список доменов, без загрузки фильтров.';
   $('updf').hidden = s.filters.level !== 'strong';
   document.querySelectorAll('.segx[data-x="startup"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set.startup));
   document.querySelectorAll('.segx[data-x="sleep"] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === s.set.sleep));
@@ -637,7 +646,7 @@ window.onState = (s) => {
   document.querySelectorAll('.segx[data-x="labels"] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'on') === !!s.set.labels));
   $('bstat').textContent = 'Заблокировано запросов с запуска: ' + s.block.count;
   if (s.panel === 'settings') $('blog').textContent = s.block.recent.length ? s.block.recent.join('\n') : 'Пока ничего (откройте сайт и вернитесь)';
-  $('shield').title = (s.adblock ? 'Блокировка рекламы: включена' : 'Блокировка рекламы: выключена') + ' • заблокировано: ' + s.block.count;
+  $('shield').title = (s.adblock ? 'Блокировка рекламы: включена' : 'Блокировка рекламы: выключена') + (s.platform === 'linux' ? '' : ' • заблокировано: ' + s.block.count);
   document.querySelectorAll('.segx[data-x="source"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.music_cfg.source));
   if (document.activeElement !== $('tok')) $('tok').value = s.music_cfg.token;
 

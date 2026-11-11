@@ -1408,19 +1408,22 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lumen"
-version = "0.3.14"
+version = "0.4.0"
 dependencies = [
  "adblock",
  "base64",
  "cpal",
  "dirs",
  "embed-resource",
+ "gdk",
+ "gtk",
  "serde",
  "serde_json",
  "sha2",
  "tao",
  "url",
  "urlencoding",
+ "webkit2gtk",
  "webview2-com",
  "windows 0.58.0",
  "windows-core 0.58.0",

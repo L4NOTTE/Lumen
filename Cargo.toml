@@ -1,8 +1,8 @@
 [package]
 name = "lumen"
-version = "0.3.14"
+version = "0.4.0"
 edition = "2021"
-description = "Lumen — лаконичный браузер для Windows на Rust"
+description = "Lumen — браузер для Windows и Linux на Rust"
 
 [dependencies]
 tao = "0.30"
@@ -12,14 +12,20 @@ serde_json = "1"
 url = "2"
 urlencoding = "2"
 dirs = "5"
+
+[target.'cfg(target_os = "windows")'.dependencies]
 adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+base64 = "0.22"
+sha2 = "0.10"
 webview2-com = "0.33"
 windows-core = "0.58"
 windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm"] }
 cpal = "0.15"
-base64 = "0.22"
-sha2 = "0.10"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+gdk = "0.18"
+webkit2gtk = { version = "=2.0.1", features = ["v2_38"] }
 [build-dependencies]
 embed-resource = "3"
 

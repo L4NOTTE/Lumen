@@ -1,16 +1,22 @@
 <div align="center">
   <img src="assets/lumen.svg" width="88" height="88" alt="Логотип Lumen">
   <h1>Lumen</h1>
-  <p><strong>Браузер для Windows, написанный на Rust</strong></p>
+  <p><strong>Браузер для Windows и Linux, написанный на Rust</strong></p>
   <p>Лаконичный интерфейс · Настраиваемый внешний вид · Инструменты разработчика сбоку</p>
-  <p><code>Rust</code> &nbsp; <code>Windows x64</code> &nbsp; <code>WebView2</code> &nbsp; <code>v0.3.14</code></p>
+  <p><code>Rust</code> &nbsp; <code>Windows x64</code> &nbsp; <code>WebView2</code> &nbsp; <code>v0.4.0</code> &nbsp; <code>Linux preview</code></p>
 </div>
 
 ---
 
-Lumen — браузер с собственным интерфейсом и нативной логикой на **Rust**. Вкладки, управление окнами, горячие клавиши, настройки и интеграция с Windows реализованы на Rust. Для отображения сайтов используется **Microsoft Edge WebView2** на основе Chromium, а интерфейс браузера создан на HTML, CSS и JavaScript.
+Lumen — браузер с собственным интерфейсом и нативной логикой на **Rust**. Вкладки, управление окнами, горячие клавиши, настройки и интеграция с Windows реализованы на Rust. В Windows сайты отображает **Microsoft Edge WebView2** на основе Chromium, в Linux — **WebKitGTK**. Интерфейс браузера создан на HTML, CSS и JavaScript.
 
-## Возможности
+## Платформы
+
+**Windows x64** — основная версия. **Ubuntu 24.04 / Linux Mint 22.x x64** — первый Linux-порт (preview).
+
+Linux использует другой движок: Chrome-расширения, Shazam/VK Next и оформление Chromium DevTools не перенесены. Linux-ветка подготовлена для сборки в Actions, но её нативный запуск на этой рабочей машине не проверен. Возможности, ограничения и получение `.deb` описаны в [LINUX.md](LINUX.md).
+
+## Возможности Windows
 
 - **Вкладки:** создание, восстановление закрытых вкладок, перестановка перетаскиванием и перенос между окнами.
 - **Внешний вид:** светлая и тёмная темы, акцентные цвета, настройка шрифтов и фона новой вкладки.
@@ -89,6 +95,13 @@ iscc installer/lumen.iss
 
 Workflow [build-windows](.github/workflows/build.yml) запускается при отправке изменений в `main` или вручную через **Actions → build-windows → Run workflow**. Он выполняет тесты, собирает браузер и установщик. После успешного завершения скачайте артефакт **lumen-windows** со страницы запуска.
 
+## Что нового в 0.4.0
+
+- Разделены Windows- и Linux-backend; общий интерфейс сохранён.
+- Добавлен Linux preview с GTK/WebKitGTK и workflow **build-linux**: тесты, сборка, графический smoke-тест, `.deb` и `.tar.gz` для Ubuntu 24.04 / Mint 22.x.
+- Windows-специфичные библиотеки и встраивание EXE-иконки отделены от Linux.
+- Подробности и отличия версий — в [LINUX.md](LINUX.md).
+
 ## Что нового в 0.3.14
 
 - Масштаб сохраняется для каждого сайта и восстанавливается при повторном открытии, новой вкладке и перезапуске.
@@ -125,3 +138,4 @@ Workflow [build-windows](.github/workflows/build.yml) запускается п�
 - Обновлён README: описание проекта на Rust, возможности, горячие клавиши и порядок сборки.
 
 В 0.3.8 добавлены перестановка вкладок, подключение «Проверить» к боковым DevTools, оформление инспектора под Lumen и обработка закрытых рекламных блоков Яндекса.
+Структура backend: [windows_main.rs](src/windows_main.rs) — Windows/WebView2, [linux.rs](src/linux.rs) — Linux/GTK/WebKitGTK, [main.rs](src/main.rs) выбирает платформу.
