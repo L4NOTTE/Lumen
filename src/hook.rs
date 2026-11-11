@@ -22,6 +22,52 @@ use wry::{WebView, WebViewExtWindows};
 
 use crate::filters::Filters;
 
+/// Replace the native floating inspector command while retaining the browser menu.
+pub fn install_inspect(wv: &WebView, inspect: impl Fn(i32, i32) + 'static) -> windows_core::Result<()> {
+    unsafe {
+        let core = wv.controller().CoreWebView2()?;
+        let env = core.cast::<ICoreWebView2_2>()?.Environment()?.cast::<ICoreWebView2Environment9>()?;
+        let inspect = Rc::new(inspect);
+        let mut token = Default::default();
+        core.cast::<ICoreWebView2_11>()?.add_ContextMenuRequested(
+            &webview2_com::ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let items = args.MenuItems()?;
+                    let mut count = 0; items.Count(&mut count)?;
+                    for i in (0..count).rev() {
+                        let item = items.GetValueAtIndex(i)?;
+                        let mut name = PWSTR::null(); item.Name(&mut name)?;
+                        if take_pwstr(name) == "inspectElement" { items.RemoveValueAtIndex(i)?; }
+                    }
+                    let mut point = windows::Win32::Foundation::POINT::default(); args.Location(&mut point)?;
+                    let item = env.CreateContextMenuItem(&HSTRING::from("Проверить"), None, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND)?;
+                    let callback = inspect.clone(); let mut selected = Default::default();
+                    item.add_CustomItemSelected(&webview2_com::CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
+                        callback(point.x, point.y); Ok(())
+                    })), &mut selected)?;
+                    items.Count(&mut count)?; items.InsertValueAtIndex(count, &item)?;
+                }
+                Ok(())
+            })), &mut token,
+        )?;
+    }
+    Ok(())
+}
+
+/// Native WebView2 Ctrl+wheel, with zoom state reported back to Rust.
+pub fn install_zoom(wv: &WebView, changed: impl Fn(f64) + 'static) -> windows_core::Result<()> {
+    unsafe {
+        let controller=wv.controller();
+        controller.CoreWebView2()?.Settings()?.SetIsZoomControlEnabled(true)?;
+        let mut token=Default::default();
+        controller.add_ZoomFactorChanged(&webview2_com::ZoomFactorChangedEventHandler::create(Box::new(move |sender,_| {
+            if let Some(controller)=sender { let mut zoom=1.0;controller.ZoomFactor(&mut zoom)?;changed(zoom); }
+            Ok(())
+        })), &mut token)?;
+    }
+    Ok(())
+}
+
 pub fn install_fullscreen(wv: &WebView, changed: impl Fn(bool) + 'static) -> windows_core::Result<()> {
     unsafe {
         let core = wv.controller().CoreWebView2()?;

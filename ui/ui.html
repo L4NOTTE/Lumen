@@ -24,7 +24,9 @@
   #tabs { height:36px; display:flex; align-items:flex-end; gap:2px; padding:4px 6px 0; }
   .tab { position:relative; display:flex; align-items:center; gap:6px; width:200px; min-width:70px; height:32px; padding:0 8px 0 12px;
     border-radius:8px 8px 0 0; color:var(--mute); cursor:default; overflow:hidden; flex:0 1 200px;
-    transition:background-color .15s, color .15s, opacity .25s; animation:tabIn .22s var(--ease) both; }
+    transition:background-color .15s, color .15s, opacity .25s; }
+  .tab.entering { animation:tabIn .22s var(--ease) both; }
+  .tab.shift { transition:transform .16s var(--ease); will-change:transform; }
   .tab:hover { background:var(--hover); }
   .tab.on { background:var(--bar); color:var(--fg); }
   .tab.sleep { opacity:.55; }
@@ -373,7 +375,8 @@ function syncFrameTheme() {
 frameMedia.addEventListener('change',syncFrameTheme);
 let hist = [];
 let lastPanel = '';
-let justDragged = false;
+let lastSettingsState = '';
+let justDragged = false, activeTabDrag = null, pendingTabOrder = null;
 const els = new Map(); // id -> элемент вкладки (обновляем, а не пересоздаём — анимации не сбрасываются)
 
 const ACC = { indigo:'#4f46e5', blue:'#2563eb', green:'#16a34a', orange:'#ea580c', pink:'#db2777', red:'#dc2626' };
@@ -384,9 +387,30 @@ const GRAD = {
 let thumb = null; // превью своего фото (только в этой сессии)
 
 // ---------- вкладки ----------
+function settleTabs(order) {
+  const tabs = order.filter(el => el.isConnected && !el.classList.contains('out'));
+  const before = new Map(tabs.map(el => [el, el.getBoundingClientRect()]));
+  for (const el of tabs) {
+    el.getAnimations().forEach(animation => animation.cancel());
+    el.classList.remove('drag', 'detach', 'shift', 'entering');
+    el.style.transform = '';
+  }
+  const box = $('tabs'), plus = $('plus');
+  const current = [...box.children].filter(el => tabs.includes(el));
+  if (tabs.some((el, i) => current[i] !== el)) tabs.forEach(el => box.insertBefore(el, plus));
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const el of tabs) {
+    const from = before.get(el), to = el.getBoundingClientRect();
+    const dx = from.left - to.left, dy = from.top - to.top;
+    if (!reduced && Math.hypot(dx, dy) > .5) el.animate([
+      {transform:`translate(${dx}px,${dy}px)`}, {transform:'translate(0,0)'}
+    ], {duration:180, easing:'cubic-bezier(.2,.8,.2,1)'});
+  }
+}
 function makeTab(t) {
   const d = document.createElement('div');
-  d.className = 'tab';
+  d.className = 'tab entering'; d.dataset.id = t.id;
+  setTimeout(() => d.classList.remove('entering'), 250);
   const sp = document.createElement('i'); sp.className = 'sp';
   const label = document.createElement('span');
   const x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
@@ -394,41 +418,69 @@ function makeTab(t) {
   d.onclick = () => { if (!justDragged) send({ cmd: 'switch', id: t.id }); };
   d.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target.closest('.x')) return;
+    activeTabDrag?.();
+    const tabs = [...d.parentElement.querySelectorAll('.tab:not(.out)')];
+    for (const el of tabs) { el.getAnimations().forEach(a => a.finish()); el.classList.remove('entering'); }
+    const slots = tabs.map(el => el.getBoundingClientRect());
+    const others = tabs.filter(el => el !== d), startIndex = tabs.indexOf(d);
     const sx = e.clientX, sy = e.clientY;
-    let moved = false;
-    d.setPointerCapture(e.pointerId);
-    const move = (ev) => {
-      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+    let moved = false, frame = 0, px = sx, py = sy, index = startIndex;
+    try { d.setPointerCapture(e.pointerId); } catch (_) { return; }
+    const preview = () => {
+      frame = 0;
+      const dx = px - sx, dy = py - sy;
       if (!moved && Math.hypot(dx, dy) < 8) return;
       moved = true;
-      d.classList.add('drag');
-      d.style.transform = `translate(${dx}px,${dy}px)`;
-      d.classList.toggle('detach', Math.abs(dy) > 46);
+      const far = Math.abs(dy) > 46;
+      d.classList.add('drag'); d.classList.toggle('detach', far);
+      d.style.transform = `translate(${dx}px,${far ? dy : 0}px)`;
+      // Stable untransformed slot centers prevent oscillation as neighbours move.
+      const center = slots[startIndex].left + slots[startIndex].width / 2 + dx;
+      index = others.filter(el => {const r=slots[tabs.indexOf(el)];return center > r.left+r.width/2;}).length;
+      const order = [...others]; order.splice(index, 0, d);
+      order.forEach((el, i) => {
+        if (el === d) return;
+        el.classList.add('shift');
+        el.style.transform = `translateX(${slots[i].left-slots[tabs.indexOf(el)].left}px)`;
+      });
     };
-    const up = (ev) => {
+    const move = ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      px = ev.clientX; py = ev.clientY;
+      if (!frame) frame = requestAnimationFrame(preview);
+    };
+    const clean = () => {
+      cancelAnimationFrame(frame);
       d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up);
+      d.removeEventListener('pointercancel', cancel); d.removeEventListener('lostpointercapture', cancel);
+      removeEventListener('resize', cancel);
+      activeTabDrag = null;
       try { d.releasePointerCapture(e.pointerId); } catch (_) {}
-      const far = Math.abs(ev.clientY - sy) > 46;
-      d.classList.remove('drag', 'detach'); d.style.transform = '';
-      if (moved) {
-        justDragged = true; setTimeout(() => { justDragged = false; }, 50);
-        if (far) {
-          const k = window.devicePixelRatio || 1;
-          send({ cmd: 'detach_tab', id: t.id, x: Math.round(ev.screenX * k), y: Math.round(ev.screenY * k) });
-        }
-      }
     };
+    const cancel = () => { clean(); if (moved) settleTabs(tabs); };
+    const up = ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      px = ev.clientX; py = ev.clientY; cancelAnimationFrame(frame); preview();
+      const detach = Math.abs(py-sy)>46 || px<0 || px>innerWidth;
+      clean();
+      if (!moved) return;
+      justDragged = true; setTimeout(() => { justDragged = false; }, 100);
+      const order = [...others]; order.splice(index, 0, d);
+      if (!detach) pendingTabOrder = {ids:order.map(el=>+el.dataset.id),until:performance.now()+1500};
+      // Commit locally before IPC acknowledgement, keeping the visual position.
+      settleTabs(detach ? tabs : order);
+      send({cmd:'drop_tab', id:t.id, index, detach});
+    };
+    activeTabDrag = cancel;
+    activeTabDrag.ids = tabs.map(el => +el.dataset.id);
     d.addEventListener('pointermove', move); d.addEventListener('pointerup', up);
-    d.addEventListener('pointercancel', () => {
-      d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up);
-      d.classList.remove('drag', 'detach'); d.style.transform = '';
-    }, { once: true });
+    d.addEventListener('pointercancel', cancel); d.addEventListener('lostpointercapture', cancel);
+    addEventListener('resize', cancel, {once:true});
   });
   d.onauxclick = (e) => { if (e.button === 1) send({ cmd: 'close_tab', id: t.id }); };
   d.append(sp, label, x);
   return d;
 }
-
 // ---------- настройки ----------
 function buildStatic() {
   const sw = $('sw');
@@ -513,13 +565,14 @@ window.onHistory = (list) => { hist = list; renderHist(); };
 
 // ---------- состояние ----------
 window.onState = (s) => {
+  const previous = state;
   state = s;
   document.body.classList.toggle('maximized',s.maximized);
-  $('logo').title = 'Lumen ' + s.version;
+  if (previous.version !== s.version) $('logo').title = 'Lumen ' + s.version;
   syncFrameTheme();
   const root = document.documentElement;
-  root.dataset.theme = s.set.theme || 'system';
-  if (s.look) {
+  if (previous.set.theme !== s.set.theme) root.dataset.theme = s.set.theme || 'system';
+  if (s.look && JSON.stringify(previous.look) !== JSON.stringify(s.look)) {
     root.style.setProperty('--acc-l', s.look.al); root.style.setProperty('--acc-d', s.look.ad);
     root.style.setProperty('--font', s.look.font); root.style.setProperty('--fs', s.look.fs + 'px');
   }
@@ -527,6 +580,7 @@ window.onState = (s) => {
 
   const box = $('tabs'), plus = $('plus');
   const ids = new Set(s.tabs.map((t) => t.id));
+  if (activeTabDrag && (activeTabDrag.ids.length !== ids.size || activeTabDrag.ids.some(id => !ids.has(id)))) activeTabDrag();
   for (const [id, el] of els) {
     if (!ids.has(id)) { els.delete(id); el.classList.add('out'); setTimeout(() => el.remove(), 170); }
   }
@@ -540,6 +594,14 @@ window.onState = (s) => {
     if (label.textContent !== text) label.textContent = text;
   }
 
+  const wanted = s.tabs.map(t => els.get(t.id));
+  const actual = [...box.children].filter(el => wanted.includes(el));
+  if (pendingTabOrder) {
+    const received = s.tabs.map(t=>t.id);
+    if (received.join(',')===pendingTabOrder.ids.join(',') || performance.now()>pendingTabOrder.until ||
+        received.length!==pendingTabOrder.ids.length || received.some(id=>!pendingTabOrder.ids.includes(id))) pendingTabOrder=null;
+  }
+  if (!activeTabDrag && !pendingTabOrder && wanted.some((el, i) => actual[i] !== el)) settleTabs(wanted);
   const cur = s.tabs.find((t) => t.id === s.active);
   document.body.classList.toggle('loading', !!(cur && cur.loading));
   if (document.activeElement !== $('url')) $('url').value = cur ? cur.url : '';
@@ -557,6 +619,9 @@ window.onState = (s) => {
   $('extbtn').classList.toggle('on', s.panel === 'ext');
   if (s.panel && s.panel !== lastPanel) { $('panel').style.animation = 'none'; $('panel').offsetHeight; $('panel').style.animation = ''; }
   lastPanel = s.panel;
+  const settingsState = JSON.stringify([s.set,s.filters,s.music_cfg,s.block,s.maximized,s.adblock]);
+  if (settingsState === lastSettingsState) return;
+  lastSettingsState = settingsState;
 
   // блокировка рекламы и распознавание музыки
   document.querySelectorAll('.segx[data-x="level"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.filters.level));
@@ -680,7 +745,7 @@ $('unpick').onclick = () => { thumb = null; send({ cmd: 'clear_background' }); }
 $('file').onchange = async (e) => {
   const f = e.target.files[0]; e.target.value = '';
   if (!f) return;
-  try { const d = await shrink(f); thumb = d; send({ cmd: 'set_background', data: d }); }
+  try { const d = await shrink(f); thumb = d; lastSettingsState = ''; window.onState(state); send({ cmd: 'set_background', data: d }); }
   catch (_) { alert('Не удалось загрузить это изображение'); }
 };
 $('url').addEventListener('focus', (e) => e.target.select());

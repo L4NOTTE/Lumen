@@ -1,0 +1,16 @@
+{
+  "newTabMeanMs": 0.0,
+  "note": "New-tab pages; blocker disabled; sum of process working sets includes shared pages; one-core CPU; state acknowledgement latency, not first rendered frame.",
+  "startupMs": 724.9,
+  "rows": [
+    {
+      "tabs": 1,
+      "usage": {
+        "processes": 11,
+        "workingSetMiB": 521.2,
+        "idleCpuCorePercent": 0.0
+      },
+      "switchMedianMs": null
+    }
+  ]
+}

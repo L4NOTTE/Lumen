@@ -139,6 +139,8 @@ enum LinkCmd {
 fn map_key(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut> {
     use Shortcut::*;
     match (vk, ctrl, shift, alt) {
+        (0x26, true, false, false) => Some(ZoomIn),           // Ctrl+Up
+        (0x28, true, false, false) => Some(ZoomOut),          // Ctrl+Down
         (0xBB | 0x6B, true, _, false) => Some(ZoomIn),
         (0xBD | 0x6D, true, _, false) => Some(ZoomOut),
         (0x30 | 0x60, true, false, false) => Some(ZoomReset),
@@ -161,6 +163,12 @@ fn map_key(vk: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Shortcut> {
         (0x31..=0x39, true, false, false) => Some(Tab((vk - 0x31) as usize)), // Ctrl+1…9
         _ => None,
     }
+}
+
+fn zoom_key(raw: &str) -> Option<String> {
+    if raw.is_empty() || raw.starts_with("about:") || raw.starts_with("data:") { return Some("lumen:newtab".into()); }
+    let parsed=url::Url::parse(raw).ok()?;
+    if matches!(parsed.scheme(),"http"|"https") { Some(parsed.origin().ascii_serialization()) } else { None }
 }
 
 fn normalize_url(s: &str) -> Option<String> {
@@ -280,6 +288,7 @@ fn log(f: impl FnOnce() -> String) {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 struct Settings {
+    site_zoom: HashMap<String, f64>,
     engine: String,
     adblock: bool,
     theme: String,
@@ -299,6 +308,7 @@ struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            site_zoom: HashMap::new(),
             engine: "google".into(),
             adblock: true,
             theme: "system".into(),
@@ -327,6 +337,9 @@ struct HistEntry {
 // ---------- события ----------
 
 enum UserEvent {
+    Inspect(u32, i32, i32),
+    InspectNode(u32, u64),
+    ZoomChanged(u32, f64),
     DevTarget(u32, Result<String, String>),
     DevResult(String),
     Pulse,
@@ -403,6 +416,7 @@ enum Cmd {
     WinClose,
     WinDrag,
     DetachTab { id: u32, x: i32, y: i32 },
+    DropTab { id: u32, index: usize, detach: bool },
     SetSleep { minutes: u32 },
     SetEco { on: bool },
 }
@@ -410,6 +424,8 @@ enum Cmd {
 // ---------- приложение ----------
 
 struct Tab {
+    visible: Option<bool>,
+    bounds: Option<Rect>,
     id: u32,
     /// None — вкладка «спит» (выгружена из памяти), адрес и заголовок сохранены.
     webview: Option<WebView>,
@@ -459,11 +475,13 @@ struct App {
     music: MusicState,
     music_busy: Arc<AtomicBool>,
     stats: Arc<hook::Stats>,
+    inspect_node: Option<u64>,
     links: Vec<Link>,
     links_path: PathBuf,
     closed: Vec<(String, String)>,
     session_path: PathBuf,
     last_session: RefCell<String>,
+    last_ui_state: RefCell<String>,
     ext_map: HashMap<String, String>,
     ext_map_path: PathBuf,
     secondary: bool,
@@ -684,6 +702,7 @@ impl App {
             let wv = self.make_webview(id, None);
             if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
                 t.webview = Some(wv);
+                t.visible = None; t.bounds = None;
             }
         }
         self.layout();
@@ -692,6 +711,10 @@ impl App {
     // ----- вкладки -----
 
     fn make_webview(&mut self, id: u32, url: Option<String>) -> WebView {
+        let key = zoom_key(url.as_deref().unwrap_or(""));
+        let factor = key.and_then(|key| self.settings.site_zoom.get(&key).copied())
+            .filter(|factor| factor.is_finite() && (0.25..=5.0).contains(factor)).unwrap_or(1.0);
+        self.zoom.insert(id, factor);
         let rect = content_rect(&self.window);
         let incognito = self.incognito;
         let newtab = self.newtab_html();
@@ -794,6 +817,10 @@ impl App {
         };
         let wv = b.build_as_child(&self.window).expect("не удалось создать WebView2");
         let _ = hook::install_blocker(&wv, self.filters.clone(), self.adblock.clone(), page, self.stats.clone(), self.blocker.clone());
+        let inspect_proxy = self.proxy.clone();
+        let _ = hook::install_inspect(&wv, move |x, y| { let _ = inspect_proxy.send_event(UserEvent::Inspect(id, x, y)); });
+        let zoom_proxy=self.proxy.clone();
+        let _=hook::install_zoom(&wv,move |factor| {let _=zoom_proxy.send_event(UserEvent::ZoomChanged(id,factor));});
         let _ = hook::install_shortcuts(&wv, move |vk, ctrl, shift, alt| {
             if vk == 0x1B && !fullscreen_keys.load(Ordering::Relaxed) { return false; }
             match map_key(vk, ctrl, shift, alt) {
@@ -816,6 +843,7 @@ impl App {
         self.next_id += 1;
         let webview = self.make_webview(id, url);
         self.tabs.push(Tab {
+            visible: None, bounds: None,
             id,
             webview: Some(webview),
             title: "Новая вкладка".into(),
@@ -840,6 +868,7 @@ impl App {
             let wv = self.make_webview(id, if url.is_empty() { None } else { Some(url) });
             if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
                 t.webview = Some(wv);
+                t.visible = None; t.bounds = None;
             }
         }
         if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
@@ -893,9 +922,11 @@ impl App {
                         hook::resume(wv);
                         t.suspended = false;
                     }
-                    let _ = wv.set_bounds(page_rect);
+                    if !t.bounds.as_ref().is_some_and(|r| r.position == page_rect.position && r.size == page_rect.size) {
+                        if wv.set_bounds(page_rect).is_ok() { t.bounds = Some(page_rect); }
+                    }
                 }
-                let _ = wv.set_visible(visible);
+                if t.visible != Some(visible) && wv.set_visible(visible).is_ok() { t.visible = Some(visible); }
                 // скрытые вкладки переводим в режим низкого потребления памяти
                 if visible == t.low {
                     let level = if visible { MemoryUsageLevel::Normal } else { MemoryUsageLevel::Low };
@@ -957,9 +988,15 @@ impl App {
             },
             "music_cfg": { "token": s.audd_token, "source": s.music_source },
         });
-        let _ = self.ui.evaluate_script(&format!("window.onState({state})"));
-        let _ = self.dev.evaluate_script(&format!("window.onState({state})"));
-        self.save_session();
+        let serialized = state.to_string();
+        let changed = *self.last_ui_state.borrow() != serialized;
+        if changed {
+            if self.ui.evaluate_script(&format!("window.onState({serialized})")).is_ok() {
+                *self.last_ui_state.borrow_mut() = serialized;
+            }
+        }
+        if self.dev_open { let _ = self.dev.evaluate_script(&format!("window.onState({state})")); }
+        if changed { self.save_session(); }
     }
 
     fn with_active(&self, f: impl FnOnce(&WebView)) {
@@ -1027,6 +1064,7 @@ impl App {
             let id = self.next_id;
             self.next_id += 1;
             self.tabs.push(Tab {
+            visible: None, bounds: None,
                 id,
                 webview: None,
                 title: t.t.clone(),
@@ -1241,6 +1279,7 @@ impl App {
             let wv = self.make_webview(id, if url.is_empty() { None } else { Some(url) });
             if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
                 t.webview = Some(wv);
+                t.visible = None; t.bounds = None;
             }
         }
         self.layout();
@@ -1260,8 +1299,21 @@ impl App {
         let old = self.zoom.get(&self.active).copied().unwrap_or(1.0);
         let next = if step == 0 { 1.0 } else { ((old * 100.0 + step as f64 * 10.0).round() / 100.0).clamp(0.25, 5.0) };
         self.with_active(|wv| { let _ = wv.zoom(next); });
-        self.zoom.insert(self.active, next);
+        self.remember_zoom(self.active, next);
         self.push_state();
+    }
+
+    fn remember_zoom(&mut self, id: u32, factor: f64) {
+        if !factor.is_finite() || !(0.25..=5.0).contains(&factor) { return; }
+        let changed = self.zoom.get(&id).is_none_or(|old| (old-factor).abs()>0.0001);
+        self.zoom.insert(id, factor);
+        let Some(key) = self.tabs.iter().find(|t|t.id==id).and_then(|t|zoom_key(&t.url)) else { return; };
+        let stored = self.settings.site_zoom.get(&key).copied().unwrap_or(1.0);
+        if changed || (stored-factor).abs()>0.0001 {
+            if (factor-1.0).abs()<0.0001 { self.settings.site_zoom.remove(&key); }
+            else { self.settings.site_zoom.insert(key, factor); }
+            self.save_settings();
+        }
     }
 
     fn cmd(&mut self, c: Cmd) {
@@ -1324,7 +1376,7 @@ impl App {
             }),
             Cmd::Fullscreen => self.set_fullscreen(!self.fullscreen),
             Cmd::Escape => { if self.fullscreen { self.with_active(|wv| { let _ = wv.evaluate_script("document.exitFullscreen().catch(()=>{})"); }); self.set_fullscreen(false); } else { self.close_panel(); } },
-            Cmd::Ready => self.push_state(),
+            Cmd::Ready => { self.last_ui_state.borrow_mut().clear(); self.push_state(); },
             Cmd::NewTab => self.new_tab(None),
             Cmd::CloseTab { id } => {
                 if id == self.active && self.fullscreen { self.set_fullscreen(false); }
@@ -1563,6 +1615,23 @@ impl App {
             Cmd::WinDrag => {
                 let _ = self.window.drag_window();
             }
+            Cmd::DropTab { id, index, detach } => {
+                let mut point = windows::Win32::Foundation::POINT::default();
+                let cursor = unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point) }.is_ok();
+                let outside = self.window.inner_position().map(|p| {
+                    let size = self.window.inner_size();
+                    point.x < p.x || point.x >= p.x + size.width as i32 || point.y < p.y || point.y >= p.y + size.height as i32
+                }).unwrap_or(false);
+                if cursor && (detach || (outside && transfer::target(self.incognito, point.x, point.y).is_some())) {
+                    self.cmd(Cmd::DetachTab { id, x: point.x, y: point.y });
+                } else if let Some(from) = self.tabs.iter().position(|t| t.id == id) {
+                    let tab = self.tabs.remove(from);
+                    let to = index.min(self.tabs.len());
+                    self.tabs.insert(to, tab);
+                    self.push_state();
+                    self.save_session();
+                }
+            }
             Cmd::DetachTab { id, x, y } => {
                 if let Some(pid) = transfer::target(self.incognito, x, y) {
                     if let Some(tab) = self.tabs.iter().find(|t| t.id == id) {
@@ -1614,7 +1683,7 @@ impl App {
                 self.save_settings();
                 for t in &self.tabs {
                     if let Some(wv) = &t.webview {
-                        let _ = wv.evaluate_script(&format!("window.__lumenCfg&&(window.__lumenCfg.labels={on})"));
+                        let _ = wv.evaluate_script(&format!("window.__lumenSetLabels?window.__lumenSetLabels({on}):(window.__lumenCfg&&(window.__lumenCfg.labels={on}))"));
                     }
                 }
                 self.push_state();
@@ -1642,10 +1711,42 @@ impl App {
 
     fn handle(&mut self, ev: UserEvent) {
         match ev {
+            UserEvent::Inspect(id, x, y) => {
+                let proxy = self.proxy.clone();
+                // Context-menu locations are viewport DIPs; CDP expects CSS pixels.
+                let zoom = self.zoom.get(&id).copied().unwrap_or(1.0).max(0.01);
+                let (x, y) = ((x as f64 / zoom).floor() as i32, (y as f64 / zoom).floor() as i32);
+                if let Some(wv) = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.webview.as_ref()) { unsafe {
+                    if let Ok(core) = wv.controller().CoreWebView2() {
+                        let callback = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |_, json| {
+                            let node = serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|v|v["backendNodeId"].as_u64()).unwrap_or(0);
+                            let _ = proxy.send_event(UserEvent::InspectNode(id, node)); Ok(())
+                        }));
+                        let params = serde_json::json!({"x":x,"y":y,"includeUserAgentShadowDOM":true}).to_string();
+                        let _ = core.CallDevToolsProtocolMethod(&windows_core::HSTRING::from("DOM.getNodeForLocation"), &windows_core::HSTRING::from(params), &callback);
+                    }
+                } }
+            },
+            UserEvent::InspectNode(id, node) => {
+                if !self.tabs.iter().any(|t| t.id == id) { return; }
+                if id != self.active { self.activate(id); }
+                self.inspect_node = (node != 0).then_some(node);
+                self.dev_open = true; self.panel.clear(); self.layout(); self.push_state(); self.cmd(Cmd::DevConnect);
+            },
+            UserEvent::ZoomChanged(id, factor) => {
+                if factor.is_finite() && factor > 0.0 && self.tabs.iter().any(|t|t.id==id) {
+                    if self.zoom.get(&id).is_some_and(|old|(old-factor).abs()<0.0001) { return; }
+                    self.remember_zoom(id,factor);
+                    if id==self.active {self.request_state();}
+                }
+            },
             UserEvent::DevTarget(id, target) => {
                 if id == self.active && self.dev_open {
                     match target.ok().and_then(|id| devtools::frontend_url(self.debug_port, &id)) {
-                        Some(url) => { let _ = self.dev.load_url(&url); },
+                        Some(mut url) => {
+                            if let Some(node) = self.inspect_node.take() { url.push_str(&format!("&lumenNode={node}")); }
+                            let _ = self.dev.load_url(&url);
+                        },
                         None => { let _ = self.dev.evaluate_script("window.devtoolsError('Не удалось подключить страницу. Используйте отдельный инспектор или перезапустите Lumen.')"); },
                     }
                 }
@@ -1691,6 +1792,10 @@ impl App {
                 let u = if u.starts_with("about:") || u.starts_with("data:") { String::new() } else { u };
                 if let Some(tab) = self.tabs.iter_mut().find(|x| x.id == id && x.webview.is_some()) {
                     tab.url = u;
+                    let factor = zoom_key(&tab.url).and_then(|key|self.settings.site_zoom.get(&key).copied())
+                        .filter(|factor|factor.is_finite() && (0.25..=5.0).contains(factor)).unwrap_or(1.0);
+                    self.zoom.insert(id,factor);
+                    if let Some(wv)=&tab.webview { let _=wv.zoom(factor); }
                     self.request_state();
                 }
             }
@@ -1887,6 +1992,20 @@ impl App {
 mod regression_tests {
     use super::*;
     #[test]
+    fn site_zoom_survives_settings_round_trip() {
+        let mut settings=Settings::default();
+        let key=zoom_key("https://Example.com/watch?v=123#part").unwrap();
+        assert_eq!(key,"https://example.com");
+        settings.site_zoom.insert(key.clone(),1.3);
+        let restored:Settings=serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored.site_zoom.get(&zoom_key("https://example.com/other").unwrap()),Some(&1.3));
+        assert!(!restored.site_zoom.contains_key(&zoom_key("https://other.example/").unwrap()));
+        assert_eq!(zoom_key(""),zoom_key("about:blank"));
+        assert_ne!(zoom_key("http://localhost:8000/"),zoom_key("http://localhost:8001/"));
+        assert!(zoom_key("chrome-extension://id/popup.html").is_none());
+        let old:Settings=serde_json::from_str("{}").unwrap();assert!(old.site_zoom.is_empty());
+    }
+    #[test]
     #[ignore = "Requires an interactive Windows desktop"]
     fn animated_window_stays_visible_when_maximized_and_fullscreen() {
         use tao::platform::windows::EventLoopBuilderExtWindows;
@@ -1918,6 +2037,12 @@ mod regression_tests {
     }
     #[test]
     fn page_shortcuts_have_correct_modifiers() {
+        assert!(map_key(0x5A,true,false,false).is_none()); // Preserve editing Undo.
+        assert!(map_key(0x5A,true,true,false).is_none());
+        assert!(matches!(map_key(0x25,false,false,true),Some(Shortcut::Back)));
+        assert!(matches!(map_key(0x26,true,false,false),Some(Shortcut::ZoomIn)));
+        assert!(matches!(map_key(0x28,true,false,false),Some(Shortcut::ZoomOut)));
+        assert!(map_key(0x5A,false,false,false).is_none());
         assert!(matches!(map_key(0xBB, true, true, false), Some(Shortcut::ZoomIn)));
         assert!(matches!(map_key(0x30, true, false, false), Some(Shortcut::ZoomReset)));
         assert!(matches!(map_key(0x49, true, true, false), Some(Shortcut::DevTools)));
@@ -2165,7 +2290,7 @@ fn main() {
         .with_visible(false)
         .with_window_icon(icon)
         .with_decorations(false) // вкладки и кнопки окна рисует сам браузер
-        .with_title(if incognito { "Lumen 0.3.6 — Инкогнито" } else { "Lumen 0.3.6" })
+        .with_title(if incognito { "Lumen 0.3.14 — Инкогнито" } else { "Lumen 0.3.14" })
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(480.0, 320.0));
     if let Some((x, y)) = cli.pos {
@@ -2215,6 +2340,11 @@ fn main() {
         .expect("не удалось создать панель интерфейса");
 
     // Use the same native shortcuts in the toolbar and in page WebViews.
+    unsafe {
+        if let Ok(core)=ui.controller().CoreWebView2() {
+            if let Ok(settings)=core.Settings() {let _=settings.SetIsZoomControlEnabled(false);}
+        }
+    }
     // Handling here prevents Ctrl+Shift+T falling through to UI's Ctrl+T.
     let p_toolbar = proxy.clone();
     let _ = hook::install_shortcuts(&ui, move |vk, ctrl, shift, alt| {
@@ -2281,11 +2411,13 @@ fn main() {
         music: MusicState::new("idle"),
         music_busy: Arc::new(AtomicBool::new(false)),
         stats: Arc::new(hook::Stats::new()),
+        inspect_node: None,
         links,
         links_path,
         closed: Vec::new(),
         session_path,
         last_session: RefCell::new(String::new()),
+        last_ui_state: RefCell::new(String::new()),
         ext_map,
         ext_map_path,
         secondary,

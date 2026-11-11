@@ -4,7 +4,19 @@
   window.__lumenRt = 1;
   window.__lumenCfg = window.__lumenCfg || { labels: true };
   let rules = [];
-  let timer = 0, last = 0;
+  let timer = 0, last = 0, fullScan = true;
+  const dirty = new Set();
+  // Keep access to publisher-created closed roots without exposing them to pages.
+  const shadowRoots = new Set();
+  const attachShadow = Element.prototype.attachShadow;
+  const yandexHost = /(^|\.)(yandex\.(ru|com|by|kz|uz|com\.tr)|ya\.ru)$/.test(location.hostname);
+  if (yandexHost) Element.prototype.attachShadow = function(options) {
+    const root = attachShadow.call(this, options);
+    shadowRoots.add(new WeakRef(root));
+    new MutationObserver(() => schedule()).observe(root, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['href','aria-label','title','src']});
+    schedule();
+    return root;
+  };
 
   const hide = (el) => {
     if (el && el.style && el.style.getPropertyValue('display') !== 'none') el.style.setProperty('display', 'none', 'important');
@@ -107,10 +119,10 @@
     }
     return best;
   };
-  const scanLabels = () => {
+  const scanLabels = (root = document.body) => {
     if (!document.body) return;
     const found = [];
-    const tw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let t; (t = tw.nextNode());) { if (isLabel(t.nodeValue) && t.parentElement) found.push(t.parentElement); }
     for (const el of found) {
       if (el.closest('nav,header,footer,[role=navigation],[role=menubar]')) continue; // пункты меню сайта
@@ -121,11 +133,26 @@
 
   // Yandex cards can split the advertising label across spans and load the
   // creative after the label. Select the card, never the whole forecast/feed.
-  const scanYandex = () => {
-    if (!/(^|\.)(yandex\.(ru|com|by|kz|uz|com\.tr)|ya\.ru)$/.test(location.hostname)) return;
-    document.querySelectorAll('[id^="yandex_rtb"],[id^="yandex_ad"],[id*="adfox"],[class*="adfox"],.ya-partner__ads').forEach(hide);
+  const queryWithin = (root, selector) => [...(root.matches?.(selector) ? [root] : []), ...root.querySelectorAll(selector)];
+  const scanYandex = (scope = document) => {
+    if (!yandexHost) return;
+    for (const ref of shadowRoots) {
+      const root = ref.deref();
+      if (!root) { shadowRoots.delete(ref); continue; }
+      if (!root.host.isConnected || root.__lumenAdHidden) continue;
+      const label = [...root.querySelectorAll('span,small,[aria-label],[title]')].some(el =>
+        isLabel(el.getAttribute('aria-label')) || isLabel(el.getAttribute('title')) ||
+        (el.children.length < 4 && isLabel((el.textContent || '').replace(/\s+/g,' ').trim())));
+      if (label && root.querySelector('a[href]') && root.querySelector('img,video,iframe')) {
+        // Shadow :host {all:initial!important} can override outer page styles.
+        const sheet = new CSSStyleSheet(); sheet.replaceSync(':host{display:none!important}');
+        root.adoptedStyleSheets = [...root.adoptedStyleSheets, sheet];
+        root.__lumenAdHidden = true; hide(root.host);
+      }
+    }
+    queryWithin(scope, '[id^="yandex_rtb"],[id^="yandex_ad"],[id*="adfox"],[class*="adfox"],.ya-partner__ads').forEach(hide);
     const seeds = new Set();
-    document.querySelectorAll('a[href], [aria-label], [title], span, small').forEach(el => {
+    queryWithin(scope, 'a[href], [aria-label], [title], span, small').forEach(el => {
       const href=el.getAttribute('href')||'';
       const text=(el.textContent||'').replace(/\s+/g,' ').trim();
       if (/^https?:\/\/(?:yabs\.yandex\.[^/]+|an\.yandex\.[^/]+)\//i.test(href) ||
@@ -146,18 +173,40 @@
     }
   };
 
-  // ---------- запуск ----------
+  // ---------- incremental cosmetic scans ----------
+  const changed = records => {
+    if (!fullScan) for (const record of records) {
+      let el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+      if (!el) continue;
+      if (el.matches('script,style,link,meta')) continue;
+      // Include the immediate surroundings: a label/media may complete a card.
+      el = el.parentElement || el;
+      dirty.add(el);
+      if (dirty.size > 64) { fullScan = true; dirty.clear(); break; }
+    }
+    schedule();
+  };
   const run = () => {
     timer = 0; last = Date.now();
+    if (!document.body) return;
+    const scopes = fullScan ? [document.body] : [...dirty].filter(el => el.isConnected);
+    fullScan = false; dirty.clear();
+    // Relational procedural selectors still need a document-wide evaluation.
     if (rules.length) runRules();
-    if (window.__lumenCfg.labels) { try { scanYandex(); scanLabels(); } catch (_) {} }
+    if (window.__lumenCfg.labels) {
+      const roots = scopes.filter(el => !scopes.some(other => other !== el && other.contains(el)));
+      for (const root of roots) { try { scanYandex(root); scanLabels(root); } catch (_) {} }
+      // Closed roots are not descendants visible to page queries.
+      if (!roots.length && yandexHost) { try { scanYandex(document.createDocumentFragment()); } catch (_) {} }
+    }
   };
   const schedule = () => {
     if (timer) return;
     timer = setTimeout(run, Math.max(300, 1000 - (Date.now() - last)));
   };
-  window.__lumenSetRules = (arr) => { rules = Array.isArray(arr) ? arr : []; schedule(); };
-  new MutationObserver(schedule).observe(document, { childList: true, subtree: true, characterData:true, attributes:true, attributeFilter:['href','aria-label','title','src'] });
-  document.addEventListener('DOMContentLoaded', schedule);
+  window.__lumenSetRules = (arr) => { rules = Array.isArray(arr) ? arr : []; fullScan = true; schedule(); };
+  window.__lumenSetLabels = enabled => { window.__lumenCfg.labels = !!enabled; fullScan = true; schedule(); };
+  new MutationObserver(changed).observe(document, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['href','aria-label','title','src'] });
+  document.addEventListener('DOMContentLoaded', () => { fullScan = true; schedule(); });
   schedule();
 })();

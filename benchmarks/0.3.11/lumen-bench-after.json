@@ -1,0 +1,34 @@
+{
+  "rows": [
+    {
+      "switchMedianMs": null,
+      "usage": {
+        "workingSetMiB": 515.9,
+        "idleCpuCorePercent": 0.0,
+        "processes": 11
+      },
+      "tabs": 1
+    },
+    {
+      "switchMedianMs": 3.9,
+      "usage": {
+        "workingSetMiB": 555.0,
+        "idleCpuCorePercent": 0.0,
+        "processes": 13
+      },
+      "tabs": 5
+    },
+    {
+      "switchMedianMs": 4.4,
+      "usage": {
+        "workingSetMiB": 715.4,
+        "idleCpuCorePercent": 0.0,
+        "processes": 28
+      },
+      "tabs": 20
+    }
+  ],
+  "note": "New-tab pages; blocker disabled; sum of process working sets includes shared pages; one-core CPU; state acknowledgement latency, not first rendered frame.",
+  "startupMs": 1968.6,
+  "newTabMeanMs": 64.85
+}

@@ -53,3 +53,24 @@ $result=$check.result.result.value|ConvertFrom-Json; $result|ConvertTo-Json -Dep
   $selected=Invoke-Cdp $dev 'Runtime.evaluate' @{expression="JSON.stringify((()=>{const names=[];const visit=r=>{r.querySelectorAll('[role=tab][aria-selected=true]').forEach(e=>names.push(e.getAttribute('aria-label')||e.textContent.trim()));r.querySelectorAll('*').forEach(e=>{if(e.shadowRoot)visit(e.shadowRoot)});};visit(document);return names})())";returnByValue=$true}
   Write-Output ($panel+': '+$selected.result.result.value)
 }
+$targets=Invoke-RestMethod "http://127.0.0.1:$port/json/list"
+$dev=$targets|Where-Object {$_.url -match '/devtools/inspector.html'}|Select-Object -First 1
+$id=[regex]::Match($dev.url,'/devtools/page/([^&]+)').Groups[1].Value
+$page=$targets|Where-Object id -eq $id
+Invoke-Cdp $page 'Runtime.evaluate' @{expression="const marker=document.createElement('div');marker.id='lumen-inspect-fixture';marker.textContent='Inspect test';document.body.append(marker)"}|Out-Null
+$doc=Invoke-Cdp $page 'DOM.getDocument' @{depth=-1}
+function Find-Marker($node) {
+    if($node.attributes -contains 'lumen-inspect-fixture'){return $node.backendNodeId}
+    foreach($child in $node.children){$found=Find-Marker $child;if($found){return $found}}
+}
+$backend=Find-Marker $doc.result.root
+if(-not $backend){throw 'Inspection fixture backend node missing'}
+Invoke-Cdp $dev 'Page.navigate' @{url=($dev.url+'&lumenNode='+$backend)}|Out-Null
+Start-Sleep -Milliseconds 4000
+$expression=@'
+(async()=>{const SDK=await import('./core/sdk/sdk.js'),UI=await import('./ui/legacy/legacy.js');const node=UI.Context.Context.instance().flavor(SDK.DOMModel.DOMNode);return JSON.stringify({selected:node?.getAttribute('id'),status:window.__lumenInspectStatus,url:location.href,targets:SDK.TargetManager.TargetManager.instance().targets().map(t=>({id:t.id(),type:t.type()})),header:!!document.getElementById('lumen-devtools-host')})})()
+'@
+$r=Invoke-Cdp $dev 'Runtime.evaluate' @{expression=$expression;awaitPromise=$true;returnByValue=$true}
+if($r.result.exceptionDetails){throw ($r.result.exceptionDetails|ConvertTo-Json -Compress -Depth 8)}
+$data=$r.result.result.value|ConvertFrom-Json;$data|ConvertTo-Json
+if($data.selected -ne 'lumen-inspect-fixture' -or -not $data.header){throw 'Inspect did not select element in dock'}

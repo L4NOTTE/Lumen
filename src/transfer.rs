@@ -12,10 +12,17 @@ pub fn publish(private: bool, x: i32, y: i32, w: u32, h: u32) {
     if let Ok(s) = serde_json::to_vec(&p) { let _ = fs::write(dir.join(format!("{}.peer", p.pid)), s); }
 }
 pub fn target(private: bool, x: i32, y: i32) -> Option<u32> {
+    // Resolve the top window rather than a stale/covered mailbox rectangle.
+    let mut window_pid = 0;
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindowThreadProcessId, WindowFromPoint, GA_ROOT};
+        let window = GetAncestor(WindowFromPoint(windows::Win32::Foundation::POINT { x, y }), GA_ROOT);
+        GetWindowThreadProcessId(window, Some(&mut window_pid));
+    }
     fs::read_dir(root()).ok()?.flatten().filter_map(|e| {
         if e.path().extension()?.to_str()? != "peer" { return None }
         let p: Peer = serde_json::from_slice(&fs::read(e.path()).ok()?).ok()?;
-        (p.pid != std::process::id() && p.private == private && now().saturating_sub(p.stamp) < 2000
+        (p.pid == window_pid && p.pid != std::process::id() && p.private == private && now().saturating_sub(p.stamp) < 2000
             && x >= p.x && x < p.x + p.w as i32 && y >= p.y && y < p.y + p.h as i32).then_some(p.pid)
     }).next()
 }

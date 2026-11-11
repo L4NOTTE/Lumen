@@ -1,0 +1,24 @@
+[
+  {
+    "variant": "before",
+    "walkedNodes": 90005,
+    "perStep": [
+      18001,
+      36002,
+      54003,
+      72004,
+      90005
+    ]
+  },
+  {
+    "variant": "after",
+    "walkedNodes": 20,
+    "perStep": [
+      4,
+      8,
+      12,
+      16,
+      20
+    ]
+  }
+]

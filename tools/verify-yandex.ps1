@@ -25,3 +25,31 @@ Invoke-Cdp $page 'Runtime.evaluate' @{expression=$expression;returnByValue=$true
 $result=Invoke-Cdp $page 'Runtime.evaluate' @{expression="new Promise(r=>setTimeout(()=>r(JSON.stringify(Object.fromEntries(['ad1','ad2','normal','forecast','yandex_rtb_test'].map(id=>[id,getComputedStyle(document.getElementById(id)).display])))),1600))";awaitPromise=$true;returnByValue=$true}
 $data=$result.result.result.value|ConvertFrom-Json;$data|ConvertTo-Json
 if($data.ad1 -ne 'none' -or $data.ad2 -ne 'none' -or $data.yandex_rtb_test -ne 'none' -or $data.normal -eq 'none' -or $data.forecast -eq 'none'){throw 'Yandex fixture regression'}
+$closed=@'
+for(const [id,ad] of [['closedAd',true],['closedNormal',false]]){
+ const host=document.createElement('div');host.id=id;document.body.append(host);
+ const root=host.attachShadow({mode:'closed'});
+ root.innerHTML='<style>:host{all:initial!important;display:block!important}</style><span>'+(ad?'Реклама':'Прогноз')+'</span><a href="https://example.com"><img width="180" height="120">Карточка</a>';
+}
+new Promise(r=>setTimeout(()=>r(JSON.stringify({ad:getComputedStyle(document.getElementById('closedAd')).display,normal:getComputedStyle(document.getElementById('closedNormal')).display})),1600))
+'@
+$result=Invoke-Cdp $page 'Runtime.evaluate' @{expression=$closed;awaitPromise=$true;returnByValue=$true}
+$data=$result.result.result.value|ConvertFrom-Json;$data|ConvertTo-Json
+if($data.ad -ne 'none' -or $data.normal -eq 'none'){throw 'Closed Shadow DOM regression'}
+$dynamic=@'
+(async()=>{
+ const normal=document.getElementById('normal'),span=document.createElement('span');span.textContent='Обычный текст';normal.append(span);
+ await new Promise(r=>setTimeout(r,1100));span.firstChild.nodeValue='Реклама';
+ await new Promise(r=>setTimeout(r,1100));
+ const incremental=getComputedStyle(normal).display;
+ window.__lumenSetLabels(false);
+ const card=document.createElement('article');card.style.cssText='width:250px;height:220px';card.innerHTML='<span>Реклама</span><a href="https://example.com"><img width="180" height="120">Объявление</a>';document.body.append(card);
+ await new Promise(r=>setTimeout(r,1100));const disabled=getComputedStyle(card).display;
+ window.__lumenSetLabels(true);await new Promise(r=>setTimeout(r,1100));
+ return JSON.stringify({incremental,disabled,reenabled:getComputedStyle(card).display,forecast:getComputedStyle(document.getElementById('forecast')).display});
+})()
+'@
+$r=Invoke-Cdp $page 'Runtime.evaluate' @{expression=$dynamic;awaitPromise=$true;returnByValue=$true}
+if($r.result.exceptionDetails){throw 'Dynamic cosmetic test threw'}
+$data=$r.result.result.value|ConvertFrom-Json;$data|ConvertTo-Json
+if($data.incremental -ne 'none' -or $data.disabled -eq 'none' -or $data.reenabled -ne 'none' -or $data.forecast -eq 'none'){throw 'Incremental label update or settings toggle regression'}
