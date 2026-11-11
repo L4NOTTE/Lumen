@@ -21,6 +21,27 @@ use wry::{WebView, WebViewExtWindows};
 
 use crate::filters::Filters;
 
+/// Distinguish a committed document from a download-only popup. Never guess
+/// from a filename: redirects and Content-Disposition decide the outcome.
+pub fn install_popup_outcome(wv:&WebView, committed:impl Fn()+'static, download:impl Fn()+'static)->windows_core::Result<()> {
+    unsafe {
+        let core=wv.controller().CoreWebView2()?;
+        let mut token=Default::default();
+        core.add_NavigationCompleted(&webview2_com::NavigationCompletedEventHandler::create(Box::new(move|_,args|{
+            if let Some(args)=args {
+                let mut success=windows::Win32::Foundation::BOOL::default();
+                args.IsSuccess(&mut success)?;
+                if success.as_bool(){committed();}
+            }
+            Ok(())
+        })),&mut token)?;
+        core.cast::<ICoreWebView2_4>()?.add_DownloadStarting(&webview2_com::DownloadStartingEventHandler::create(Box::new(move|_,_|{
+            download();Ok(())
+        })),&mut token)?;
+    }
+    Ok(())
+}
+
 pub fn install_link_gestures(
     wv: &WebView,
     gesture: Rc<std::cell::Cell<Option<std::time::Instant>>>,
