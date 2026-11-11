@@ -1,0 +1,154 @@
+Running verify-tabs.ps1
+{
+  "order": [
+    2,
+    3,
+    1
+  ],
+  "dom": [
+    2,
+    3,
+    1
+  ]
+}
+Rust reorder and DOM order: OK
+Live preview: {"drag":true,"shifted":2,"transitions":["0.16s","0.16s"]}
+Pointer drag through toolbar handler to Rust: OK
+DOM nodes retained; no repeated entrance; page state and timeOrigin retained: OK
+Running verify-yandex.ps1
+{
+  "ad1": "none",
+  "ad2": "none",
+  "normal": "block",
+  "forecast": "flex",
+  "yandex_rtb_test": "none"
+}
+{
+  "ad": "none",
+  "normal": "block"
+}
+{
+  "incremental": "none",
+  "disabled": "block",
+  "reenabled": "none",
+  "forecast": "flex"
+}
+Running verify-shazam-layout.ps1
+{
+  "width": 360,
+  "scroll": 360,
+  "app": 360,
+  "buttonRight": 344,
+  "whiteSpace": "nowrap",
+  "background": "rgb(27, 28, 32)"
+}
+{
+  "width": 470,
+  "scroll": 470,
+  "app": 470,
+  "buttonRight": 454,
+  "whiteSpace": "nowrap",
+  "background": "rgb(27, 28, 32)"
+}
+Running verify-devtools.ps1
+Native hints removed; accessible labels retained; no button shadow or scale: OK
+Window controls, zoom and drag initialization: OK
+New tab through UI handler: OK
+{
+  "url": "http://127.0.0.1:51144/devtools/inspector.html?ws=127.0.0.1:51144/devtools/page/DA90942E52D3178A38325ACB799929AA&panel=elements",
+  "title": "Lumen DevTools 0.3",
+  "customHeader": true,
+  "tabs": [
+    "Welcome",
+    "Elements",
+    "Styles",
+    "Computed",
+    "Layout"
+  ],
+  "rootTop": 44,
+  "shadows": 18
+}
+console: ["Console"]
+sources: ["Sources","Page"]
+network: ["Network"]
+timeline: ["Performance","Interactions"]
+resources: ["Application","Interactions"]
+{
+  "selected": "lumen-inspect-fixture",
+  "status": "selected",
+  "url": "http://127.0.0.1:51144/devtools/inspector.html?ws=127.0.0.1:51144/devtools/page/DA90942E52D3178A38325ACB799929AA&panel=elements&lumenNode=25",
+  "targets": [
+    {
+      "id": "main",
+      "type": "frame"
+    }
+  ],
+  "header": true
+}
+{"icons":[{"name":"arrow-back","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"arrow-forward","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"refresh","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"mouse","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"touch-app","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"edge-welcome","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"edge-elements","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"chevron-double-right","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"triangle-down","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"select-element","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"devices","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"cross","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"gear","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"dots-vertical","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"cross","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"plus","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"search","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"replace","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"cross-circle-filled","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"cross-circle-filled","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"chevron-up","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"chevron-down","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"cross","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"dots-horizontal","mask":"url(\"http://127.0.0.1:51144/devtool"}],"codes":[{"class":"tree-outline elements-tree-outline source-code","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgb(25, 27, 34)","line":"normal","color":"rgb(220, 227, 240)"},{"class":" webkit-html-tag-name ","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"20.15px","color":"rgb(157, 187, 255)"},{"class":" webkit-html-tag-name ","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"20.15px","color":"rgb(157, 187, 255)"},{"class":" webkit-html-tag-name ","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"20.15px","color":"rgb(157, 187, 255)"},{"class":" webkit-html-tag-name ","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"20.15px","color":"rgb(157, 187, 255)"}],"nativeTheme":"platform-windows theme-with-dark-background -theme-with-dark-background baseline-grayscale","version":"2","top":44,"headerFits":true}
+[
+  {
+    "text": "VM32:2 LUMEN_WARNING_FIX: warning w",
+    "background": "rgb(65, 60, 38)",
+    "fragments": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(220, 227, 240)"
+      },
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(253, 243, 170)"
+      }
+    ],
+    "links": 2
+  },
+  {
+    "text": "VM32:3 LUMEN_ERROR_FIX: error with ",
+    "background": "rgb(78, 53, 52)",
+    "fragments": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(220, 227, 240)"
+      },
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(249, 222, 220)"
+      }
+    ],
+    "links": 2
+  }
+]
+{"icons":[{"name":"triangle-down","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"filter","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"triangle-down","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"info","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"warning-filled","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"triangle-right","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"edge-search-info","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"cross-circle-filled","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"triangle-right","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"edge-search-info","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"chevron-left-dot","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"chevron-right","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"arrow-back","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"arrow-forward","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"refresh","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"mouse","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"touch-app","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"edge-console","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"chevron-double-right","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"triangle-down","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"select-element","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"devices","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"cross-circle-filled","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"warning-filled","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"gear","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"dots-vertical","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"cross","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"plus","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"left-panel-open","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"clear","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"expand","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"eye","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"cross-circle-filled","mask":"url(\"http://127.0.0.1:51144/devtool"},{"name":"gear","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"},{"name":"search","mask":"url(\"data:image/svg+xml,%3Csvg%20xm"}],"codes":[{"class":"source-code","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"15.6px","color":"rgb(38, 50, 74)"},{"class":"source-code","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"15.6px","color":"rgb(38, 50, 74)"},{"class":"source-code","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"15.6px","color":"rgb(38, 50, 74)"},{"class":"source-code","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"normal","color":"rgb(38, 50, 74)"},{"class":"cm-content cm-lineWrapping","font":"\"Cascadia Code\", \"Cascadia Mono\", Consolas, monospace","size":"13px","background":"rgba(0, 0, 0, 0)","line":"21.45px","color":"rgb(38, 50, 74)"}],"nativeTheme":"platform-windows baseline-grayscale","version":"2","top":44,"headerFits":true}
+[
+  {
+    "text": "VM35:2 LUMEN_WARNING_FIX: warning w",
+    "background": "rgb(254, 246, 213)",
+    "fragments": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(38, 50, 74)"
+      },
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(62, 47, 0)"
+      }
+    ],
+    "links": 2
+  },
+  {
+    "text": "VM35:3 LUMEN_ERROR_FIX: error with ",
+    "background": "rgb(252, 235, 235)",
+    "fragments": [
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(38, 50, 74)"
+      },
+      {
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(65, 14, 11)"
+      }
+    ],
+    "links": 2
+  }
+]
+Browser UI regression suite: OK

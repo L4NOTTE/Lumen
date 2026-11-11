@@ -1,0 +1,104 @@
+[
+  {
+    "name": "middle_click_opens_exactly_one_background_tab",
+    "passed": true,
+    "details": {
+      "active": 1,
+      "tabs": [
+        {
+          "id": 1,
+          "loading": false,
+          "sleeping": false,
+          "title": "Middle test",
+          "url": "http://127.0.0.1:53872/source"
+        },
+        {
+          "id": 2,
+          "loading": false,
+          "sleeping": false,
+          "title": "Destination",
+          "url": "http://127.0.0.1:53872/background"
+        }
+      ]
+    }
+  },
+  {
+    "name": "source_page_not_reloaded",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "new_background_view_is_hidden",
+    "passed": true,
+    "details": {
+      "visibility": "hidden"
+    }
+  },
+  {
+    "name": "middle_click_in_closed_shadow_root",
+    "passed": true,
+    "details": {
+      "active": 1,
+      "tabs": [
+        {
+          "id": 1,
+          "loading": false,
+          "sleeping": false,
+          "title": "Middle test",
+          "url": "http://127.0.0.1:53872/source"
+        },
+        {
+          "id": 2,
+          "loading": false,
+          "sleeping": false,
+          "title": "Destination",
+          "url": "http://127.0.0.1:53872/background"
+        },
+        {
+          "id": 3,
+          "loading": false,
+          "sleeping": false,
+          "title": "Destination",
+          "url": "http://127.0.0.1:53872/shadow-background"
+        }
+      ]
+    }
+  },
+  {
+    "name": "normal_target_blank_still_activates",
+    "passed": true,
+    "details": {
+      "active": 4,
+      "tabs": [
+        {
+          "id": 1,
+          "loading": false,
+          "sleeping": false,
+          "title": "Middle test",
+          "url": "http://127.0.0.1:53872/source"
+        },
+        {
+          "id": 2,
+          "loading": false,
+          "sleeping": false,
+          "title": "Destination",
+          "url": "http://127.0.0.1:53872/background"
+        },
+        {
+          "id": 3,
+          "loading": false,
+          "sleeping": false,
+          "title": "Destination",
+          "url": "http://127.0.0.1:53872/shadow-background"
+        },
+        {
+          "id": 4,
+          "loading": false,
+          "sleeping": false,
+          "title": "Destination",
+          "url": "http://127.0.0.1:53872/foreground"
+        }
+      ]
+    }
+  }
+]

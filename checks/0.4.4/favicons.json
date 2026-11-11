@@ -1,0 +1,73 @@
+[
+  {
+    "name": "native_favicon_is_displayed_as_32px_png",
+    "passed": true,
+    "details": {
+      "key": "bfa0fbb53abb8315da9ac5747d5996e692ad9012a145207b9a0c38c895431d81",
+      "bytes": 314
+    }
+  },
+  {
+    "name": "dynamic_favicon_changes_and_old_cache_is_released",
+    "passed": true,
+    "details": {
+      "cache": 1,
+      "blueKey": "d29ae4b6778cc5c33a638d3af8d52273865a9ebe2fc76c15a5578065b6690e16"
+    }
+  },
+  {
+    "name": "identical_icons_share_one_ui_cache_entry",
+    "passed": true,
+    "details": {
+      "cache": 1,
+      "payloadBytes": 314
+    }
+  },
+  {
+    "name": "icon_update_does_not_reload_source",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "missing_icon_has_neutral_fallback",
+    "passed": true,
+    "details": {
+      "tab": {
+        "icon": null,
+        "id": 1,
+        "loading": false,
+        "sleeping": false,
+        "title": "/none",
+        "url": "http://127.0.0.1:63245/none"
+      },
+      "count": 1,
+      "cache": 0,
+      "bytes": 0,
+      "loaded": false,
+      "natural": 0,
+      "globe": true,
+      "home": false
+    }
+  },
+  {
+    "name": "new_tab_uses_lumen_fallback",
+    "passed": true,
+    "details": {
+      "tab": {
+        "icon": null,
+        "id": 3,
+        "loading": false,
+        "sleeping": false,
+        "title": "Новая вкладка",
+        "url": ""
+      },
+      "count": 2,
+      "cache": 0,
+      "bytes": 0,
+      "loaded": false,
+      "natural": 0,
+      "globe": false,
+      "home": true
+    }
+  }
+]

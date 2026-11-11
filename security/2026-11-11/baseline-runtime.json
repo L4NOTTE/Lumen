@@ -1,0 +1,42 @@
+{
+  "mode": "baseline",
+  "results": [
+    {
+      "name": "hashed_ui_csp",
+      "passed": true,
+      "details": {
+        "baseline": true,
+        "hasPolicy": false
+      }
+    },
+    {
+      "name": "inline_script_injection",
+      "passed": true,
+      "details": {
+        "injected": 1
+      }
+    },
+    {
+      "name": "background_markup_rejected",
+      "passed": true,
+      "details": {
+        "unchanged": false
+      }
+    },
+    {
+      "name": "incognito_preserves_regular_background",
+      "passed": true,
+      "details": {
+        "exists": false
+      }
+    },
+    {
+      "name": "foreign_ui_navigation_and_ipc",
+      "passed": true,
+      "details": {
+        "href": "http://127.0.0.1:50840/attack",
+        "startup": "restore"
+      }
+    }
+  ]
+}

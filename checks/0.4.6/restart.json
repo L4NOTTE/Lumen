@@ -1,0 +1,6 @@
+[
+  "toast_fits_320_and_800px_toolbar",
+  "cancel_keeps_window",
+  "restart_restores_session_with_startup_new",
+  "settings_button_disables_cdp_after_restart"
+]

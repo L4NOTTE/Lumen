@@ -1,0 +1,84 @@
+{
+  "mode": "fixed",
+  "results": [
+    {
+      "name": "hashed_ui_csp",
+      "passed": true,
+      "details": {
+        "baseline": false,
+        "hasPolicy": true
+      }
+    },
+    {
+      "name": "inline_script_injection",
+      "passed": true,
+      "details": {
+        "injected": 0
+      }
+    },
+    {
+      "name": "background_markup_rejected",
+      "passed": true,
+      "details": {
+        "unchanged": true
+      }
+    },
+    {
+      "name": "incognito_preserves_regular_background",
+      "passed": true,
+      "details": {
+        "exists": true
+      }
+    },
+    {
+      "name": "incognito_cannot_delete_regular_extensions",
+      "passed": true,
+      "details": {
+        "preserved": true
+      }
+    },
+    {
+      "name": "incognito_profile_cleanup",
+      "passed": true,
+      "details": {
+        "removed": true
+      }
+    },
+    {
+      "name": "devtools_cannot_call_privileged_settings",
+      "passed": true,
+      "details": {
+        "startup": "new"
+      }
+    },
+    {
+      "name": "devtools_receives_no_tokens_or_tab_list",
+      "passed": true,
+      "details": {
+        "observed": true,
+        "leaked": false,
+        "keys": [
+          "incognito",
+          "look",
+          "set"
+        ]
+      }
+    },
+    {
+      "name": "ordinary_page_cannot_call_native_commands",
+      "passed": true,
+      "details": {
+        "wryTransportPresent": true,
+        "startup": "new"
+      }
+    },
+    {
+      "name": "foreign_ui_navigation_and_ipc",
+      "passed": true,
+      "details": {
+        "href": "about:blank",
+        "startup": "new"
+      }
+    }
+  ]
+}
