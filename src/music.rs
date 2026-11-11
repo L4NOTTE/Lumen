@@ -21,8 +21,5 @@ impl MusicState {
     pub fn new(status: &str) -> Self {
         Self { status: status.into(), song: None, msg: String::new() }
     }
-    pub fn error(msg: impl Into<String>) -> Self {
-        Self { status: "error".into(), song: None, msg: msg.into() }
-    }
 }
 
