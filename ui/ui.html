@@ -2,6 +2,7 @@
 <html lang="ru" data-theme="system">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <style>
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.001ms !important; transition-duration:.001ms !important; } }
   :root { --acc-l:#4f46e5; --acc-d:#8b8dff; --font:'Segoe UI Variable','Segoe UI',system-ui,sans-serif; --fs:13px;
@@ -38,6 +39,12 @@
   .sp { display:none; width:11px; height:11px; border:2px solid var(--line); border-top-color:var(--acc); border-radius:50%;
     flex:none; animation:spin .7s linear infinite; }
   .tab.loading .sp { display:block; }
+  .tab-icon { width:16px;height:16px;flex:none;display:grid;place-items:center;font-style:normal;pointer-events:none; }
+  .tab-icon > * { grid-area:1/1; }
+  .tab-icon img,.tab-icon svg { width:16px;height:16px;object-fit:contain; }
+  .tab-home { font-size:17px;font-weight:800;color:var(--acc); }
+  .tab.loading .tab-icon > :not(.sp) { display:none!important; }
+  @media(max-width:540px){.tab{gap:4px}.tab-icon,.tab-icon img,.tab-icon svg{width:14px;height:14px}.tab .x{width:14px;flex:none}}
 
   .x, .btn { display:grid; place-items:center; border:0; background:none; color:inherit; border-radius:6px; cursor:pointer;
     transition:background-color .12s, transform .1s var(--ease), color .15s; }
@@ -172,7 +179,7 @@
   .ph h2 { font-size:clamp(18px,2.1vw,23px); line-height:1.3; }
   .row > * { max-width:100%; }
   .hint { overflow-wrap:anywhere; }
-  #toast { max-width:calc(100vw - 24px); text-align:center; line-height:1.4; }
+  #toast { top:8px; max-width:calc(100vw - 24px); max-height:64px; overflow:auto; box-sizing:border-box; text-align:center; line-height:1.4; }
   @media(max-width:900px) { #engine { width:84px; } .wc button { width:36px; } #zreset { padding:6px 8px; } }
   @media(max-width:720px) { #engine,#star { display:none; } #nav{gap:2px;padding:0 5px}.btn{width:27px} .tab{min-width:52px} #logo{margin-right:3px} .tb{width:25px}.wc button{width:32px} }
   @media(max-width:540px) { #inc,#music { display:none; } .tab{min-width:44px;padding-left:6px} .grp{padding:12px} .chip{padding:7px 9px} }
@@ -196,6 +203,10 @@ html[data-platform="linux"] #bstat,html[data-platform="linux"] #blog,
 html[data-platform="linux"] h3:has(+ #bstat),
 html[data-platform="linux"] .grp:has(.segx[data-x="sleep"]),
 html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important}
+</style><style>
+#downloadsbtn{position:relative}#dlbadge{position:absolute;right:0;top:0;min-width:12px;border-radius:7px;background:var(--acc);color:white;font-size:9px;line-height:12px;text-align:center;padding:0 2px}
+.dl-row{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:12px;padding:18px 0;border-bottom:1px solid var(--line)}.dl-symbol{color:var(--acc);padding-top:2px}.dl-name{font-weight:600;overflow-wrap:anywhere;line-height:1.5}.dl-path,.dl-meta{color:var(--mute);font-size:12px;line-height:1.6;overflow-wrap:anywhere}.dl-progress{display:block;width:100%;height:5px;border:0;margin:9px 0;accent-color:var(--acc)}.dl-actions{display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap}.dl-actions button{font-size:12px}.dl-error{color:#e27676}
+@media(max-width:650px){.dl-actions{grid-column:2/-1}.dl-row{grid-template-columns:26px minmax(0,1fr)}}
 </style></head>
 <body>
   <div class="resize n" data-resize="n"></div><div class="resize ne" data-resize="ne"></div><div class="resize nw" data-resize="nw"></div><div class="resize e" data-resize="e"></div><div class="resize w" data-resize="w"></div>
@@ -204,6 +215,7 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
     <button class="btn" id="plus" title="Новая вкладка (Ctrl+T)">+</button>
     <div class="grow"></div>
     <div id="badge" title="История, куки и кэш не сохраняются">🕶 Инкогнито</div>
+    <button class="btn tb" id="downloadsbtn" title="Загрузки (Ctrl+J)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span id="dlbadge" hidden></span></button>
     <button class="btn tb" id="hist" title="История (Ctrl+H)">🕒</button>
     <button class="btn tb" id="extbtn" title="Расширения">🧩</button>
     <button class="btn tb" id="inc" title="Окно инкогнито (Ctrl+Shift+N)">🕶</button>
@@ -235,6 +247,13 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
   <div id="toast"></div>
 
   <div id="panel" hidden>
+    <div class="pin" id="p-downloads" hidden>
+      <div class="ph"><h2>Загрузки</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
+      <div class="row" style="margin-bottom:16px"><input class="inp" id="dlq" placeholder="Найти файл" autocomplete="off" spellcheck="false"><button class="chip" id="dlopenfolder">Папка загрузок</button><button class="chip" id="dlclear">Очистить список</button></div>
+      <div class="hint" style="margin-bottom:18px">Файлы сохраняются в папку «Загрузки». Очистка списка не удаляет файлы.</div>
+      <div id="dlempty" class="grp">Пока нет загрузок. Файлы с сайтов появятся здесь.</div>
+      <div id="dllist"></div>
+    </div>
     <!-- ИСТОРИЯ -->
     <div class="pin" id="p-history" hidden>
       <div class="ph"><h2>История</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
@@ -285,6 +304,17 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
     <!-- НАСТРОЙКИ -->
     <div class="pin" id="p-settings" hidden>
       <div class="ph"><h2>Настройки</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
+
+      <div class="grp" data-platform-only="windows"><h3>Браузер по умолчанию</h3>
+        <button class="chip" id="defaultbrowser">Выбрать Lumen в Windows…</button>
+        <div class="hint">Открыть системные настройки для ссылок HTTP и HTTPS. Выбор подтверждается в Windows.</div>
+      </div>
+
+      <div class="grp" data-platform-only="windows"><h3>Инструменты разработчика</h3>
+        <div class="hint" id="devmode-status">Режим разработчика выключен.</div>
+        <button class="chip" id="devmode">Включить и перезапустить…</button>
+        <div class="hint">Боковой DevTools требует локального отладочного порта. В этом режиме другие программы на компьютере могут получить доступ к данным открытых страниц. Перед переключением закройте остальные окна Lumen и окна расширений. Вкладки этого окна восстановятся, несохранённые формы могут быть потеряны.</div>
+      </div>
 
       <div class="grp"><h3>Тема</h3>
         <div class="seg" data-k="theme">
@@ -386,6 +416,10 @@ let lastPanel = '';
 let lastSettingsState = '';
 let justDragged = false, activeTabDrag = null, pendingTabOrder = null;
 const els = new Map(); // id -> элемент вкладки (обновляем, а не пересоздаём — анимации не сбрасываются)
+const tabIcons = new Map(); // only icons referenced by the current tabs
+window.onTabIcon = (key,data) => {
+  if(typeof key==='string'&&/^[a-f0-9]{64}$/.test(key)&&typeof data==='string'&&data.length<=12000&&data.startsWith('data:image/png;base64,'))tabIcons.set(key,data);
+};
 
 const ACC = { indigo:'#4f46e5', blue:'#2563eb', green:'#16a34a', orange:'#ea580c', pink:'#db2777', red:'#dc2626' };
 const GRAD = {
@@ -420,6 +454,13 @@ function makeTab(t) {
   d.className = 'tab entering'; d.dataset.id = t.id;
   setTimeout(() => d.classList.remove('entering'), 250);
   const sp = document.createElement('i'); sp.className = 'sp';
+  const icon=document.createElement('i');icon.className='tab-icon';icon.setAttribute('aria-hidden','true');
+  const img=document.createElement('img');img.className='tab-favicon';img.alt='';img.draggable=false;img.hidden=true;
+  const home=document.createElement('b');home.className='tab-home';home.textContent='L';
+  const globe=document.createElementNS('http://www.w3.org/2000/svg','svg');globe.classList.add('tab-globe');globe.setAttribute('viewBox','0 0 24 24');globe.setAttribute('fill','none');globe.setAttribute('stroke','currentColor');globe.setAttribute('stroke-width','1.5');
+  globe.innerHTML='<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/>';
+  img.onerror=()=>{img.hidden=true;home.hidden=!!d.dataset.site;globe.toggleAttribute('hidden',!d.dataset.site);};
+  icon.append(img,home,globe,sp);
   const label = document.createElement('span');
   const x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
   x.onclick = (e) => { e.stopPropagation(); send({ cmd: 'close_tab', id: t.id }); };
@@ -486,7 +527,7 @@ function makeTab(t) {
     addEventListener('resize', cancel, {once:true});
   });
   d.onauxclick = (e) => { if (e.button === 1) send({ cmd: 'close_tab', id: t.id }); };
-  d.append(sp, label, x);
+  d.append(icon, label, x);
   return d;
 }
 // ---------- настройки ----------
@@ -586,6 +627,9 @@ window.onState = (s) => {
     root.style.setProperty('--font', s.look.font); root.style.setProperty('--fs', s.look.fs + 'px');
   }
   document.body.classList.toggle('inc', !!s.incognito);
+  $('devmode-status').textContent = s.developer_mode ? 'Режим разработчика включён. Локальный CDP доступен.' : 'Режим разработчика выключен. Отладочный порт закрыт.';
+  $('devmode').textContent = s.developer_mode ? 'Выключить и перезапустить…' : 'Включить и перезапустить…';
+  $('devmode').disabled = !!s.incognito;
 
   const box = $('tabs'), plus = $('plus');
   const ids = new Set(s.tabs.map((t) => t.id));
@@ -599,9 +643,17 @@ window.onState = (s) => {
     el.classList.toggle('on', t.id === s.active);
     el.classList.toggle('sleep', !!t.sleeping);
     el.classList.toggle('loading', !!t.loading);
+    el.dataset.site=t.url?'1':'';
+    const data=tabIcons.get(t.icon),img=el.querySelector('.tab-favicon');
+    if(data){if(img.getAttribute('src')!==data)img.src=data;}else if(img.hasAttribute('src'))img.removeAttribute('src');
+    img.hidden=!data;
+    el.querySelector('.tab-home').hidden=!!data||!!t.url;
+    el.querySelector('.tab-globe').toggleAttribute('hidden',!!data||!t.url);
     const label = el.children[1], text = t.title || 'Новая вкладка';
     if (label.textContent !== text) label.textContent = text;
   }
+  const usedIcons=new Set(s.tabs.map(t=>t.icon).filter(Boolean));
+  for(const key of tabIcons.keys())if(!usedIcons.has(key))tabIcons.delete(key);
 
   const wanted = s.tabs.map(t => els.get(t.id));
   const actual = [...box.children].filter(el => wanted.includes(el));
@@ -621,9 +673,12 @@ window.onState = (s) => {
   // панели
   $('panel').hidden = !s.panel || s.panel === 'dev';
   $('devbtn').classList.toggle('on', !!s.dev_open);
-  for (const n of ['history', 'settings', 'ext', 'music']) $('p-' + n).hidden = s.panel !== n;
+  for (const n of ['history', 'settings', 'ext', 'music', 'downloads']) $('p-' + n).hidden = s.panel !== n;
   $('zreset').textContent = (s.zoom || 100) + '%';
   $('hist').classList.toggle('on', s.panel === 'history');
+  $('downloadsbtn').classList.toggle('on', s.panel === 'downloads');
+  $('dlbadge').hidden = !(s.download_count > 0);
+  $('dlbadge').textContent = s.download_count > 99 ? '99+' : String(s.download_count || '');
   $('gear').classList.toggle('on', s.panel === 'settings');
   $('extbtn').classList.toggle('on', s.panel === 'ext');
   if (s.panel && s.panel !== lastPanel) { $('panel').style.animation = 'none'; $('panel').offsetHeight; $('panel').style.animation = ''; }
@@ -666,6 +721,40 @@ window.onState = (s) => {
   $('unpick').hidden = !s.set.has_bg;
 };
 
+// Downloads use native operations; this view never starts or executes files itself.
+let downloadRows = [], downloadQuery = '';
+const downloadNodes = new Map();
+const downloadBytes = n => { if(!Number.isFinite(n)||n<0)return '';const units=['Б','КиБ','МиБ','ГиБ'];let i=0;while(n>=1024&&i<3){n/=1024;i++}return (i?n.toFixed(1):Math.round(n))+' '+units[i]; };
+function renderDownloads() {
+  const list=$('dllist'),query=downloadQuery.toLocaleLowerCase();
+  const rows=downloadRows.filter(r=>!query||(r.name+' '+r.path).toLocaleLowerCase().includes(query));
+  const ids=new Set(rows.map(r=>r.id));for(const [id,entry] of downloadNodes){if(!ids.has(id)){entry.el.remove();downloadNodes.delete(id)}}
+  $('dlempty').hidden=rows.length>0;$('dlempty').textContent=downloadRows.length?'Ничего не найдено.':'Пока нет загрузок. Файлы с сайтов появятся здесь.';
+  const names={running:'Загрузка',completed:'Готово',cancelled:'Отменено',failed:'Ошибка',interrupted:'Прервано'};
+  for(const r of rows){
+    let entry=downloadNodes.get(r.id);
+    if(!entry){
+      const el=document.createElement('div');el.className='dl-row';el.dataset.downloadId=r.id;
+      const icon=document.createElement('div');icon.className='dl-symbol';icon.innerHTML='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 13h8m-8 4h5"/></svg>';
+      const body=document.createElement('div'),name=document.createElement('div'),path=document.createElement('div'),bar=document.createElement('progress'),meta=document.createElement('div'),actions=document.createElement('div');
+      name.className='dl-name';path.className='dl-path';bar.className='dl-progress';meta.className='dl-meta';actions.className='dl-actions';bar.max=100;bar.setAttribute('aria-label','Прогресс загрузки');
+      const buttons={};for(const [action,label] of [['open','Открыть'],['folder','Папка'],['cancel','Отмена']]){const b=document.createElement('button');b.className='chip';b.textContent=label;b.onclick=()=>send({cmd:'download_action',id:r.id,action});buttons[action]=b;actions.append(b)}
+      body.append(name,path,bar,meta);el.append(icon,body,actions);entry={el,name,path,bar,meta,buttons,key:''};downloadNodes.set(r.id,entry);list.append(el);
+    }
+    const key=JSON.stringify(r);if(entry.key!==key){entry.key=key;entry.name.textContent=r.name;entry.path.textContent=r.path;
+      const progress=r.total>0?Math.min(100,Math.round(r.received/r.total*100)):null;
+      entry.bar.hidden=r.status!=='running';if(progress===null)entry.bar.removeAttribute('value');else entry.bar.value=progress;
+      entry.meta.textContent=(names[r.status]||r.status)+' · '+downloadBytes(r.received)+(r.total?' / '+downloadBytes(r.total):'')+(progress!==null&&r.status==='running'?' · '+progress+'%':'')+(r.error?' · '+r.error:'');entry.meta.classList.toggle('dl-error',r.status==='failed');
+      entry.buttons.open.hidden=r.status!=='completed';entry.buttons.cancel.hidden=r.status!=='running';
+    }
+  }
+  // Keep existing nodes stable when progress changes; order only new/reordered entries.
+  const wanted=rows.map(r=>downloadNodes.get(r.id).el);if(wanted.some((el,i)=>list.children[i]!==el))wanted.forEach(el=>list.append(el));
+}
+window.onDownloads=rows=>{downloadRows=Array.isArray(rows)?rows:[];renderDownloads();};
+$('dlq').oninput=e=>{downloadQuery=e.target.value;renderDownloads();};
+$('dlclear').onclick=()=>send({cmd:'clear_downloads'});
+$('dlopenfolder').onclick=()=>send({cmd:'downloads_folder'});
 // ---------- уведомление ----------
 let toastTimer = 0;
 window.onToast = (m) => {
@@ -719,6 +808,7 @@ $('shield').onclick = () => send({ cmd: 'toggle_adblock' });
 $('adb').onclick = () => send({ cmd: 'toggle_adblock' });
 const togglePanel = (name) => send(state.panel === name ? { cmd: 'close_panel' } : { cmd: 'open_panel', name });
 $('hist').onclick = () => togglePanel('history');
+$('downloadsbtn').onclick = () => togglePanel('downloads');
 $('extbtn').onclick = () => togglePanel('ext');
 $('mgo').onclick = () => send({ cmd: 'recognize' });
 $('mopen').onclick = () => { if (song && song.link) send({ cmd: 'open_url', url: song.link }); };
@@ -738,6 +828,11 @@ $('tabs').addEventListener('dblclick', (e) => { if (dragZone(e.target)) send({ c
 document.querySelectorAll('.segx[data-x="sleep"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_sleep', minutes: +b.dataset.v }));
 document.querySelectorAll('.segx[data-x="eco"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_eco', on: b.dataset.v === 'on' }));
 document.querySelectorAll('.segx[data-x="startup"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_startup', mode: b.dataset.v }));
+$('defaultbrowser').onclick = () => send({cmd:'default_browser'});
+$('devmode').onclick = () => {
+  const on = !state.developer_mode;
+  if(confirm((on ? 'Включить режим разработчика? Другие программы на компьютере смогут обращаться к данным страниц. ' : 'Выключить режим разработчика? ') + 'Закройте другие окна Lumen и расширений. Браузер перезапустится; вкладки восстановятся, несохранённые формы могут быть потеряны.')) send({cmd:'restart_developer',on});
+};
 document.querySelectorAll('.segx[data-x="labels"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_labels', on: b.dataset.v === 'on' }));
 $('extgo').onclick = () => { const v = $('extin').value.trim(); if (v) send({ cmd: 'ext_install', input: v }); };
 $('extin').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('extgo').click(); });
@@ -771,6 +866,7 @@ addEventListener('keydown', (e) => {
   else if (e.ctrlKey && k === 't') { e.preventDefault(); send({ cmd: 'new_tab' }); }
   else if (e.ctrlKey && k === 'w') { e.preventDefault(); send({ cmd: 'close_tab', id: state.active }); }
   else if (e.ctrlKey && k === 'l') { e.preventDefault(); $('url').focus(); }
+  else if (e.ctrlKey && k === 'j') { e.preventDefault(); togglePanel('downloads'); }
   else if (e.ctrlKey && k === 'h') { e.preventDefault(); togglePanel('history'); }
   else if (e.ctrlKey && k === 'd') { e.preventDefault(); send({ cmd: 'add_current_link' }); }
   else if (e.ctrlKey && e.key === ',') { e.preventDefault(); togglePanel('settings'); }
