@@ -1,0 +1,18 @@
+   Compiling lumen v0.4.11 (C:\УЧЕБА\проекты\lumen-browser\lumen)
+warning: constant `ID` is never used
+ --> src\linux_desktop.rs:3:7
+  |
+3 | const ID: &str = "io.github.L4NOTTE.Lumen.desktop";
+  |       ^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `lumen` (bin "lumen" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.85s
+     Running unittests src\main.rs (target\debug\deps\lumen-10f631952f40a483.exe)
+
+running 1 test
+test regression_tests::start_page_csp_allows_search_and_blocks_inline_injection ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out; finished in 0.41s
+

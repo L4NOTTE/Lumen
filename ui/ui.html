@@ -16,6 +16,7 @@
   /* режим инкогнито: фиолетовая тема, всегда тёмная */
   body.inc { --bg:#160f24; --bar:#21173a; --fg:#ece6f7; --mute:#a99bc4; --line:#3a2d52; --acc:#b794f6; --hover:#2d2148; }
 
+  [hidden] { display:none !important; }
   * { box-sizing:border-box; margin:0; user-select:none; }
   [hidden] { display:none !important; }
   html,body { height:100%; overflow:hidden; background:var(--bg); color:var(--fg);
@@ -77,7 +78,7 @@
     background:var(--bg); color:var(--fg); outline:none; user-select:text;
     transition:border-color .15s, background-color .15s, box-shadow .2s; }
   #url:focus { border-color:var(--acc); background:var(--bar); box-shadow:0 0 0 3px color-mix(in srgb, var(--acc) 20%, transparent); }
-  select { height:30px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); padding:0 6px; }
+  select { appearance:none; -webkit-appearance:none; height:30px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); padding:0 24px 0 6px; background-image:linear-gradient(45deg,transparent 50%,var(--fg) 50%),linear-gradient(135deg,var(--fg) 50%,transparent 50%); background-position:calc(100% - 11px) 50%,calc(100% - 7px) 50%; background-size:4px 4px; background-repeat:no-repeat; }
 
   /* индикатор загрузки */
   #bar { position:absolute; left:0; right:0; bottom:-1px; height:2px; overflow:hidden; opacity:0; transition:opacity .25s; pointer-events:none; }
@@ -197,7 +198,7 @@ button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outl
 .seg button.on:hover,.segx button.on:hover{background:var(--acc);color:#fff}
 </style><style>
 html[data-platform="linux"] [data-platform-only="windows"],
-html[data-platform="linux"] .wc,html[data-platform="linux"] .resize,html[data-platform="linux"] #extbtn,
+html[data-platform="linux"] #extbtn,
 html[data-platform="linux"] #updf,html[data-platform="linux"] .segx[data-x="level"],
 html[data-platform="linux"] #bstat,html[data-platform="linux"] #blog,
 html[data-platform="linux"] h3:has(+ #bstat),
@@ -235,7 +236,7 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
     <button class="btn" id="zout" title="Уменьшить (Ctrl+−)">−</button>
     <button class="chip" id="zreset" title="Сбросить масштаб (Ctrl+0)">100%</button>
     <button class="btn" id="zin" title="Увеличить (Ctrl++)">+</button>
-    <button class="btn" id="devbtn" title="Инструменты разработчика">&lt;/&gt;</button>
+    <button class="btn" id="devbtn" hidden title="Инструменты разработчика">&lt;/&gt;</button>
     <button class="btn" id="star" title="Добавить в быстрые ссылки (Ctrl+D)">☆</button>
     <select id="engine" title="Поисковая система">
       <option value="google">Google</option>
@@ -305,12 +306,12 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
     <div class="pin" id="p-settings" hidden>
       <div class="ph"><h2>Настройки</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
 
-      <div class="grp" data-platform-only="windows"><h3>Браузер по умолчанию</h3>
+      <div class="grp"><h3>Браузер по умолчанию</h3>
         <button class="chip" id="defaultbrowser">Выбрать Lumen в Windows…</button>
         <div class="hint">Открыть системные настройки для ссылок HTTP и HTTPS. Выбор подтверждается в Windows.</div>
       </div>
 
-      <div class="grp" data-platform-only="windows"><h3>Инструменты разработчика</h3>
+      <div class="grp" hidden><h3>Инструменты разработчика</h3>
         <div class="hint" id="devmode-status">Режим разработчика выключен.</div>
         <button class="chip" id="devmode">Включить и перезапустить…</button>
         <div class="hint">Боковой DevTools требует локального отладочного порта. В этом режиме другие программы на компьютере могут получить доступ к данным открытых страниц. Перед переключением закройте остальные окна Lumen и окна расширений. Вкладки этого окна восстановятся, несохранённые формы могут быть потеряны.</div>
@@ -324,7 +325,7 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
       </div>
 
       <div class="grp"><h3>Акцентный цвет</h3>
-        <div class="swatches" id="sw"></div>
+        <div class="swatches" id="sw"></div><label>Свой цвет <input type="color" id="customaccent" value="#4f46e5"></label>
       </div>
 
       <div class="grp"><h3>Шрифт интерфейса</h3>
@@ -560,7 +561,10 @@ function setLook(patch) {
 }
 function shrink(file) {
   return new Promise((res, rej) => {
-    const img = new Image(), u = URL.createObjectURL(file);
+    const img = new Image(), reader = new FileReader();
+    if (file.size > 32 * 1024 * 1024) return rej(new Error('too big'));
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = () => rej(new Error('read failed'));
     img.onload = () => {
       let max = 1920, q = 0.82;
       for (let i = 0; i < 4; i++) {
@@ -569,13 +573,13 @@ function shrink(file) {
         c.width = Math.max(1, Math.round(img.width * sc)); c.height = Math.max(1, Math.round(img.height * sc));
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
         const d = c.toDataURL('image/jpeg', q);
-        if (d.length < 1700000) { URL.revokeObjectURL(u); return res(d); }
+        if (d.length < 1700000) { return res(d); }
         max *= 0.7; q = Math.max(0.5, q - 0.1);
       }
-      URL.revokeObjectURL(u); rej(new Error('too big'));
+      rej(new Error('too big'));
     };
     img.onerror = () => rej(new Error('bad image'));
-    img.src = u;
+    reader.readAsDataURL(file);
   });
 }
 
@@ -615,6 +619,8 @@ window.onHistory = (list) => { hist = list; renderHist(); };
 // ---------- состояние ----------
 window.onState = (s) => {
   document.documentElement.dataset.platform = s.platform || 'windows';
+  $('defaultbrowser').textContent = s.platform === 'linux' ? 'Сделать Lumen браузером по умолчанию…' : 'Выбрать Lumen в Windows…';
+  $('defaultbrowser').nextElementSibling.textContent = s.platform === 'linux' ? 'Изменить обработчик ссылок HTTP и HTTPS для текущего пользователя через XDG. Права администратора не нужны.' : 'Открыть системные настройки для ссылок HTTP и HTTPS. Выбор подтверждается в Windows.';
   const previous = state;
   state = s;
   document.body.classList.toggle('maximized',s.maximized);
@@ -709,6 +715,7 @@ window.onState = (s) => {
   document.querySelectorAll('.seg').forEach((seg) => {
     seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set[seg.dataset.k]));
   });
+  if (/^#[0-9a-f]{6}$/i.test(s.set.accent)) $('customaccent').value = s.set.accent;
   $('sw').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set.accent));
   $('font').value = s.set.font;
   $('tiles').querySelectorAll('.tile').forEach((t) => {
@@ -828,7 +835,10 @@ $('tabs').addEventListener('dblclick', (e) => { if (dragZone(e.target)) send({ c
 document.querySelectorAll('.segx[data-x="sleep"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_sleep', minutes: +b.dataset.v }));
 document.querySelectorAll('.segx[data-x="eco"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_eco', on: b.dataset.v === 'on' }));
 document.querySelectorAll('.segx[data-x="startup"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_startup', mode: b.dataset.v }));
-$('defaultbrowser').onclick = () => send({cmd:'default_browser'});
+$('customaccent').onchange = e => setLook({accent:e.target.value});
+$('defaultbrowser').onclick = () => {
+  if(state.platform!=='linux'||confirm('Сделать Lumen браузером по умолчанию для HTTP и HTTPS в этой учётной записи?'))send({cmd:'default_browser'});
+};
 $('devmode').onclick = () => {
   const on = !state.developer_mode;
   if(confirm((on ? 'Включить режим разработчика? Другие программы на компьютере смогут обращаться к данным страниц. ' : 'Выключить режим разработчика? ') + 'Закройте другие окна Lumen и расширений. Браузер перезапустится; вкладки восстановятся, несохранённые формы могут быть потеряны.')) send({cmd:'restart_developer',on});

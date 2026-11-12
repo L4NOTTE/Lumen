@@ -4,10 +4,9 @@ mod ext;
 mod crx;
 mod filters;
 mod hook;
-mod music;
 mod capture;
+mod music;
 mod sys;
-mod devtools;
 mod transfer;
 mod default_browser;
 mod favicon;
@@ -44,14 +43,13 @@ use wry::{
 
 const TOOLBAR_H: f64 = 80.0;
 const UI_HTML: &str = include_str!(concat!(env!("OUT_DIR"),"/ui.html"));
-const DEV_HTML: &str = include_str!("../ui/devtools.html");
-const NEWTAB_HTML: &str = include_str!("../ui/newtab.html");
+const NEWTAB_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/newtab.html"));
 
 /// Аргументы движка. SmartScreen остаётся включённым, перевод страниц выключен,
 /// число процессов ограничено, вкладки одного сайта делят процесс (экономия памяти).
 /// «Эконом-режим» дополнительно включает облегчённый режим Chromium и отключает кэш переходов назад.
 /// У всех окон одного профиля аргументы обязаны совпадать, поэтому строка считается один раз при запуске.
-fn browser_args(eco: bool, debug_port: u16) -> String {
+fn browser_args(eco: bool) -> String {
     let mut disabled = String::from("Translate,msWebOOUI,msPdfOOUI");
     let mut extra = String::new();
     if eco {
@@ -59,9 +57,8 @@ fn browser_args(eco: bool, debug_port: u16) -> String {
         extra.push_str(" --enable-low-end-device-mode");
     }
     let limit = if eco { 3 } else { 4 };
-    let debugging = if debug_port != 0 {format!(" --remote-debugging-port={debug_port} --remote-debugging-address=127.0.0.1")} else {String::new()};
     format!(
-        "--enable-features=ParallelDownloading --disable-features={disabled} --renderer-process-limit={limit}{debugging}{extra}"
+        "--enable-features=ParallelDownloading --disable-features={disabled} --renderer-process-limit={limit} --force-webrtc-ip-handling-policy=disable_non_proxied_udp{extra}"
     )
 }
 
@@ -221,7 +218,8 @@ fn search_url(engine: &str) -> &'static str {
 }
 
 /// (цвет для светлой темы, цвет для тёмной)
-fn accent_pair(k: &str) -> (&'static str, &'static str) {
+fn accent_pair(k: &str) -> (&str, &str) {
+    if crate::security::hex_color(k) { return (k, k); }
     match k {
         "blue" => ("#2563eb", "#60a5fa"),
         "green" => ("#16a34a", "#4ade80"),
@@ -337,11 +335,7 @@ struct HistEntry {
 
 enum UserEvent {
     DownloadPoll,
-    Inspect(u32, i32, i32),
-    InspectNode(u32, u64),
     ZoomChanged(u32, f64),
-    DevTarget(u32, Result<String, String>),
-    DevResult(String),
     Pulse,
     FullscreenChanged(u32, bool),
     Ui(String),
@@ -351,7 +345,6 @@ enum UserEvent {
     Loading(u32, bool),
     Navigate(u32, String),
     Search(u32, String),
-    NewTab(String),
     PopupTab(u32,String,bool),
     PopupCommitted(u32),
     PopupDownload(u32),
@@ -374,12 +367,7 @@ enum UserEvent {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Cmd {
     WinResize { edge: String },
-    DevConnect,
-    NativeDevTools,
     FrameTheme { dark: bool },
-    DevClose,
-    DevWidth { width: f64 },
-    DevQuery { kind: String, expression: Option<String> },
     ZoomIn, ZoomOut, ZoomReset, DevTools, Fullscreen, Escape,
     DownloadAction { id: String, action: String },
     ClearDownloads,
@@ -417,7 +405,6 @@ enum Cmd {
     AddCurrentLink,
     SetStartup { mode: String },
     DefaultBrowser,
-    RestartDeveloper { on: bool },
     SetLabels { on: bool },
     WinMin,
     WinMax,
@@ -448,16 +435,13 @@ struct Tab {
 }
 
 struct App {
+    newtab_token: String,
     popup_tabs: HashMap<u32,(u32,bool)>,
     download_hosts: Vec<WebView>,
     favicons: favicon::SharedCache,
     sent_icons: RefCell<std::collections::HashSet<String>>,
     downloads: crate::downloads::Shared,
-    debug_port: u16,
     frame_dark: bool,
-    dev: WebView,
-    dev_open: bool,
-    dev_width: f64,
     fullscreen_keys: Arc<AtomicBool>,
     transferring: HashMap<u32, Instant>,
     fullscreen: bool,
@@ -488,7 +472,6 @@ struct App {
     ext_dir: PathBuf,
     music: MusicState,
     stats: Arc<hook::Stats>,
-    inspect_node: Option<u64>,
     links: Vec<Link>,
     links_path: PathBuf,
     closed: Vec<(String, String)>,
@@ -527,6 +510,7 @@ fn inset_px(w: &Window) -> u32 {
     0
 }
 
+#[cfg(test)]
 fn dock_width(width: u32, scale: f64, preferred: f64) -> u32 {
     let logical = width as f64 / scale;
     (preferred.clamp(240.0, 960.0).min((logical - 240.0).max(logical * 0.45)) * scale).round() as u32
@@ -612,7 +596,7 @@ impl App {
                 s.push('\n');
             }
         }
-        let _ = fs::write(&self.history_path, s);
+        let _ = crate::security::atomic_write(&self.history_path, s.as_bytes());
     }
 
     fn record_history(&mut self, id: u32) {
@@ -620,10 +604,10 @@ impl App {
             return;
         }
         let Some(t) = self.tabs.iter().find(|t| t.id == id) else { return };
-        if !(t.url.starts_with("http://") || t.url.starts_with("https://")) {
+        if t.url.len()>8192 || !crate::security::web_link(&t.url) {
             return;
         }
-        let (u, title) = (t.url.clone(), t.title.clone());
+        let (u, title) = (t.url.clone(), t.title.chars().take(512).collect());
         let ts = now_secs();
         if let Some(last) = self.history.last_mut() {
             if last.u == u && ts.saturating_sub(last.ts) < 30 {
@@ -633,10 +617,7 @@ impl App {
         }
         let entry = HistEntry { t: title, u, ts };
         if let Ok(line) = serde_json::to_string(&entry) {
-            use std::io::Write;
-            if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&self.history_path) {
-                let _ = writeln!(f, "{line}");
-            }
+            let _ = crate::security::append_history(&self.history_path, &line);
         }
         self.history.push(entry);
         if self.history.len() > HISTORY_MAX + 500 {
@@ -669,7 +650,7 @@ impl App {
             font_stack(&s.font),
             font_px(&s.font_size)
         );
-        let theme = if self.incognito { "dark" } else { s.theme.as_str() };
+        let theme = if self.incognito { "dark" } else { match s.theme.as_str() { "dark"=>"dark", "light"=>"light", _=>"system" } };
         let (bg_attr, bg_css) = if self.incognito {
             ("0", String::new())
         } else if s.bg_mode == "custom" {
@@ -686,10 +667,11 @@ impl App {
         let links_json = if self.incognito {
             "[]".to_string()
         } else {
-            serde_json::to_string(&self.links).unwrap_or_else(|_| "[]".into())
+            serde_json::to_string(&self.links.iter().enumerate().filter(|(_,link)| crate::security::web_link(&link.u)).map(|(i,link)|serde_json::json!({"i":i,"t":link.t,"u":link.u})).collect::<Vec<_>>()).unwrap_or_else(|_| "[]".into())
         }
         .replace("</", "<\\/");
         NEWTAB_HTML
+            .replace("__NEWTAB_TOKEN__", &self.newtab_token)
             .replace("/*__LINKS__*/[]", &links_json)
             .replace("__INC__", if self.incognito { "1" } else { "0" })
             .replace("__THEME__", theme)
@@ -728,6 +710,7 @@ impl App {
         let rect = content_rect(&self.window);
         let incognito = self.incognito;
         let newtab = self.newtab_html();
+        let newtab_token = self.newtab_token.clone();
         let navigation_html = newtab.clone();
         let (p_title, p_url, p_win, p_nav) = (
             self.proxy.clone(),
@@ -743,7 +726,7 @@ impl App {
         let gesture=Rc::new(std::cell::Cell::new(None::<Instant>));
         let popup_gesture=gesture.clone();
         let mut b = WebViewBuilder::with_web_context(&mut self.ctx)
-            .with_devtools(true)
+            .with_devtools(false)
             .with_incognito(incognito)
             .with_browser_extensions_enabled(!incognito)
             .with_additional_browser_args(&self.args)
@@ -771,7 +754,7 @@ impl App {
                 // поисковая строка стартовой страницы
                 if parsed.host_str() == Some("lumen.invalid") {
                     // команды работают только со стартовой страницы (у неё адрес страницы ещё пуст)
-                    let on_newtab = page_nav.borrow().is_empty();
+                    if !page_nav.borrow().is_empty() || !crate::security::newtab_request(&parsed, &newtab_token) { return false; }
                     let q = |name: &str| {
                         parsed.query_pairs().find(|(k, _)| k == name).map(|(_, v)| v.into_owned())
                     };
@@ -781,12 +764,12 @@ impl App {
                                 let _ = p_nav.send_event(UserEvent::Search(id, text));
                             }
                         }
-                        "/add" if on_newtab => {
+                        "/add" => {
                             if let Some(u) = q("u") {
                                 let _ = p_nav.send_event(UserEvent::Link(LinkCmd::Add(q("t").unwrap_or_default(), u)));
                             }
                         }
-                        "/del" if on_newtab => {
+                        "/del" => {
                             if let Some(i) = q("i").and_then(|v| v.parse::<usize>().ok()) {
                                 let _ = p_nav.send_event(UserEvent::Link(LinkCmd::Del(i)));
                             }
@@ -834,6 +817,7 @@ impl App {
             None => b.with_html(newtab),
         };
         let wv = b.build_as_child(&self.window).expect("не удалось создать WebView2");
+        hook::lock_down(&wv).expect("site privacy policy");
         let _ = crate::downloads::install(&wv, &self.downloads);
         let committed=self.proxy.clone();let download=self.proxy.clone();
         let _=hook::install_popup_outcome(&wv,
@@ -843,8 +827,6 @@ impl App {
         let _=favicon::install(&wv,&icon,&self.favicons,move||{let _=icon_proxy.send_event(UserEvent::FaviconsChanged);});
         let _=hook::install_link_gestures(&wv,gesture);
         let _ = hook::install_blocker(&wv, self.filters.clone(), self.adblock.clone(), page, self.stats.clone(), self.blocker.clone());
-        let inspect_proxy = self.proxy.clone();
-        let _ = hook::install_inspect(&wv, move |x, y| { let _ = inspect_proxy.send_event(UserEvent::Inspect(id, x, y)); });
         let zoom_proxy=self.proxy.clone();
         let _=hook::install_zoom(&wv,move |factor| {let _=zoom_proxy.send_event(UserEvent::ZoomChanged(id,factor));});
         let _ = hook::install_shortcuts(&wv, move |vk, ctrl, shift, alt| {
@@ -913,7 +895,6 @@ impl App {
             let _ = wv.focus();
         });
         self.push_state();
-        if self.dev_open { self.cmd(Cmd::DevConnect); }
     }
 
     fn close_panel(&mut self) {
@@ -930,21 +911,7 @@ impl App {
 
     fn layout(&mut self) {
         let open = !self.panel.is_empty() && !self.fullscreen;
-        let docked = self.dev_open && !self.fullscreen && !open;
-        let mut page_rect = if self.fullscreen { full_rect(&self.window) } else { content_rect(&self.window) };
-        let size = self.window.inner_size();
-        let i = inset_px(&self.window);
-        let available_width = size.width.saturating_sub(2 * i);
-        let available_height = size.height.saturating_sub(toolbar_px(&self.window) + 2 * i);
-        let dock = dock_width(available_width, self.window.scale_factor(), self.dev_width).min(available_width);
-        if docked {
-            page_rect.size = PhysicalSize::new(available_width.saturating_sub(dock), available_height).into();
-            let _ = self.dev.set_bounds(Rect {
-                position: PhysicalPosition::new((size.width - i - dock) as i32, (toolbar_px(&self.window) + i) as i32).into(),
-                size: PhysicalSize::new(dock, available_height).into(),
-            });
-        }
-        let _ = self.dev.set_visible(docked);
+        let page_rect=if self.fullscreen {full_rect(&self.window)} else {content_rect(&self.window)};
         let _ = self.ui.set_visible(!self.fullscreen);
         // при открытой панели интерфейс занимает всё окно, а страница скрыта
         let _ = self.ui.set_bounds(if open { full_rect(&self.window) } else { ui_rect(&self.window) });
@@ -1004,8 +971,8 @@ impl App {
             "version": env!("CARGO_PKG_VERSION"),
             "active": self.active,
             "zoom": (self.zoom.get(&self.active).copied().unwrap_or(1.0) * 100.0).round(),
-            "panel": if self.dev_open && self.panel.is_empty() { "dev" } else { &self.panel },
-            "dev_open": self.dev_open,
+            "panel": &self.panel,
+            "dev_open": false,
             "maximized": self.window.is_maximized(),
             "incognito": self.incognito,
             "engine": s.engine,
@@ -1032,7 +999,7 @@ impl App {
                     Vec::new()
                 },
             },
-            "developer_mode": self.debug_port != 0,
+            "developer_mode": false,
             "music_cfg": { "token": "", "source": "system" },
         });
         let serialized = state.to_string();
@@ -1041,10 +1008,6 @@ impl App {
             if self.ui.evaluate_script(&format!("window.onState({serialized})")).is_ok() {
                 *self.last_ui_state.borrow_mut() = serialized;
             }
-        }
-        if self.dev_open {
-            let appearance=serde_json::json!({"incognito":self.incognito,"set":{"theme":s.theme},"look":{"al":al,"ad":ad}});
-            let _ = self.dev.evaluate_script(&format!("window.onState({appearance})"));
         }
         if changed { self.save_session(); }
     }
@@ -1103,8 +1066,9 @@ impl App {
         };
         if let Ok(j) = serde_json::to_string(&session) {
             if *self.last_session.borrow() != j {
-                let _ = fs::write(&self.session_path, &j);
-                *self.last_session.borrow_mut() = j;
+                if crate::security::atomic_write(&self.session_path, j.as_bytes()).is_ok() {
+                    *self.last_session.borrow_mut() = j;
+                }
             }
         }
     }
@@ -1142,7 +1106,7 @@ impl App {
 
     fn save_links(&self) {
         if let Ok(j) = serde_json::to_string_pretty(&self.links) {
-            let _ = fs::write(&self.links_path, j);
+            let _ = crate::security::atomic_write(&self.links_path, j.as_bytes());
         }
     }
 
@@ -1172,7 +1136,7 @@ impl App {
     /// Адрес окна расширения (всплывающее окно или страница настроек), если оно есть.
     fn ext_page(&self, id: &str) -> Option<(String, bool)> {
         let dir = self.ext_dir.join(self.ext_map.get(id)?);
-        let raw = fs::read_to_string(dir.join("manifest.json")).ok()?;
+        let raw = crate::security::read_profile_text(&dir.join("manifest.json"),1048576).ok()?;
         let m: serde_json::Value = serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok()?;
         let popup = m["action"]["default_popup"]
             .as_str()
@@ -1341,59 +1305,11 @@ impl App {
                 let direction = match edge.as_str() { "n" => North, "ne" => NorthEast, "nw" => NorthWest, "e" => East, "w" => West, _ => return };
                 let _ = self.window.drag_resize_window(direction);
             },
-            Cmd::DevConnect => {
-                if self.debug_port==0 {return;}
-                let proxy = self.proxy.clone();
-                let id = self.active;
-                self.with_active(|wv| unsafe {
-                    if let Ok(core) = wv.controller().CoreWebView2() {
-                        let handler = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, json| {
-                            let target = if result.is_ok() {
-                                serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|j| j["targetInfo"]["targetId"].as_str().map(str::to_string)).ok_or_else(|| "WebView2 не вернул targetId".to_string())
-                            } else { Err(format!("Target.getTargetInfo: {result:?}")) };
-                            let _ = proxy.send_event(UserEvent::DevTarget(id, target)); Ok(())
-                        }));
-                        let _ = core.CallDevToolsProtocolMethod(&windows_core::HSTRING::from("Target.getTargetInfo"), &windows_core::HSTRING::from("{}"), &handler);
-                    }
-                });
-            },
-            Cmd::FrameTheme { dark } => {
-                self.frame_dark = dark;
-                self.window.set_background_color(Some(if self.incognito { (22,15,36,255) } else if dark { (27,28,32,255) } else { (243,244,246,255) }));
-            },
-            Cmd::DevClose => { self.dev_open = false; let _ = self.dev.load_html(DEV_HTML); self.layout(); self.push_state(); },
-            Cmd::DevWidth { width } => { if width.is_finite() { self.dev_width = width.clamp(240.0, 960.0); self.layout(); } },
-            Cmd::DevQuery { kind, expression } => {
-                let (method, params) = match kind.as_str() {
-                    "console" => ("Runtime.evaluate", serde_json::json!({"expression": expression.unwrap_or_default(), "returnByValue": true, "awaitPromise": true, "generatePreview": true})),
-                    "network" => ("Runtime.evaluate", serde_json::json!({"expression": "performance.getEntriesByType('resource').slice(-200).map(r=>({url:r.name,type:r.initiatorType,ms:Math.round(r.duration),bytes:r.transferSize}))", "returnByValue": true})),
-                    "storage" => ("Runtime.evaluate", serde_json::json!({"expression": "({cookies:document.cookie,localStorage:Object.fromEntries(Object.entries(localStorage)),sessionStorage:Object.fromEntries(Object.entries(sessionStorage))})", "returnByValue": true})),
-                    "performance" => ("Runtime.evaluate", serde_json::json!({"expression":"({navigation:performance.getEntriesByType('navigation').map(n=>({url:n.name,domReadyMs:Math.round(n.domContentLoadedEventEnd),loadMs:Math.round(n.loadEventEnd),responseMs:Math.round(n.responseEnd)})),resources:performance.getEntriesByType('resource').length,memory:performance.memory?{usedBytes:performance.memory.usedJSHeapSize,totalBytes:performance.memory.totalJSHeapSize}:null})", "returnByValue":true})),
-                    _ => return,
-                };
-                let p = self.proxy.clone();
-                self.with_active(|wv| unsafe {
-                    if let Ok(core) = wv.controller().CoreWebView2() {
-                        let handler = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |res, value| {
-                            let text = if res.is_ok() { value } else { format!("Ошибка DevTools: {res:?}") };
-                            let _ = p.send_event(UserEvent::DevResult(text));
-                            Ok(())
-                        }));
-                        let _ = core.CallDevToolsProtocolMethod(&windows_core::HSTRING::from(method), &windows_core::HSTRING::from(params.to_string()), &handler);
-                    }
-                });
-            }
+            Cmd::FrameTheme { dark } => {self.frame_dark=dark;self.update_window_bg();},
+            Cmd::DevTools => self.toast("Инструменты разработчика отключены"),
             Cmd::ZoomIn => self.change_zoom(1),
             Cmd::ZoomOut => self.change_zoom(-1),
             Cmd::ZoomReset => self.change_zoom(0),
-            Cmd::DevTools => {
-                if self.debug_port==0 { self.toast("DevTools выключен. Включите режим разработчика в настройках браузера."); return; }
-                if self.dev_open { self.cmd(Cmd::DevClose); }
-                else { self.dev_open = true; self.panel.clear(); self.layout(); self.push_state(); self.cmd(Cmd::DevConnect); }
-            },
-            Cmd::NativeDevTools => self.with_active(|wv| unsafe {
-                if let Ok(core) = wv.controller().CoreWebView2() { let _ = core.OpenDevToolsWindow(); }
-            }),
             Cmd::Fullscreen => self.set_fullscreen(!self.fullscreen),
             Cmd::Escape => { if self.fullscreen { self.with_active(|wv| { let _ = wv.evaluate_script("document.exitFullscreen().catch(()=>{})"); }); self.set_fullscreen(false); } else { self.close_panel(); } },
             Cmd::DownloadAction { id, action } => { self.downloads.borrow_mut().action(&id,&action); self.push_downloads(); self.request_state(); },
@@ -1474,7 +1390,7 @@ impl App {
             }
             Cmd::OpenPanel { name } => {
                 if name == "dev" { self.cmd(Cmd::DevTools); return; }
-                if matches!(name.as_str(), "history" | "settings" | "ext" | "music" | "dev" | "downloads") {
+                if matches!(name.as_str(), "history" | "settings" | "ext" | "downloads") {
                     self.panel = name.clone();
                     self.layout();
                     self.push_state();
@@ -1506,7 +1422,7 @@ impl App {
             }
             Cmd::SetLook { theme, accent, font, font_size } => {
                 if THEMES.contains(&theme.as_str())
-                    && ACCENTS.contains(&accent.as_str())
+                    && (ACCENTS.contains(&accent.as_str()) || crate::security::hex_color(&accent))
                     && FONTS.contains(&font.as_str())
                     && SIZES.contains(&font_size.as_str())
                 {
@@ -1531,7 +1447,7 @@ impl App {
             Cmd::SetBackground { data } => {
                 if crate::security::image_data(&data) {
                     if !self.incognito {
-                        let _ = fs::write(&self.bg_path, &data);
+                        let _ = crate::security::atomic_write(&self.bg_path, data.as_bytes());
                     }
                     self.bg_data = Some(data);
                     self.settings.bg_mode = "custom".into();
@@ -1617,22 +1533,6 @@ impl App {
                     _ => self.toast("Откройте сайт, который хотите добавить"),
                 }
             }
-            Cmd::RestartDeveloper { on } => {
-                if self.incognito {self.toast("Переключите режим в обычном окне");return;}
-                if self.downloads.borrow().active_count()>0 {self.toast("Дождитесь завершения загрузок перед перезапуском");return;}
-                let secondary=self.secondary;
-                self.secondary=false;
-                self.save_session();
-                self.secondary=secondary;
-                let result=std::env::current_exe().and_then(|exe| {
-                    let mut child=std::process::Command::new(exe);
-                    child.args(["--restart-after",&std::process::id().to_string(),"--restore-session"]);
-                    child.env_remove("LUMEN_ENABLE_CDP");
-                    if on {child.arg("--developer-mode");}
-                    child.spawn()
-                });
-                if result.is_ok(){let _=self.proxy.send_event(UserEvent::Quit);}else{self.toast("Не удалось перезапустить браузер");}
-            }
             Cmd::DefaultBrowser => {
                 match std::env::current_exe().and_then(|exe|default_browser::open_settings(&exe)) {
                     Ok(())=>self.toast("Выберите Lumen в приложениях по умолчанию Windows"),
@@ -1670,6 +1570,7 @@ impl App {
                 }
             }
             Cmd::DetachTab { id, x, y } => {
+                if self.incognito { self.toast("Перенос вкладок недоступен в инкогнито"); return; }
                 if let Some(pid) = transfer::target(self.incognito, x, y) {
                     if let Some(tab) = self.tabs.iter().find(|t| t.id == id) {
                         if !self.transferring.contains_key(&id) && transfer::send(pid, id, &tab.url) {
@@ -1741,7 +1642,7 @@ impl App {
                         });
                     }
                     if let Ok(j) = serde_json::to_string(&self.ext_map) {
-                        let _ = fs::write(&self.ext_map_path, j);
+                        let _ = crate::security::atomic_write(&self.ext_map_path, j.as_bytes());
                     }
                 }
                 let p = self.proxy.clone();
@@ -1765,30 +1666,6 @@ impl App {
                     self.request_state();
                 }
             },
-            UserEvent::Inspect(id, x, y) => {
-                if self.debug_port==0 {self.cmd(Cmd::DevTools);return;}
-                let proxy = self.proxy.clone();
-                // Context-menu locations are viewport DIPs; CDP expects CSS pixels.
-                let zoom = self.zoom.get(&id).copied().unwrap_or(1.0).max(0.01);
-                let (x, y) = ((x as f64 / zoom).floor() as i32, (y as f64 / zoom).floor() as i32);
-                if let Some(wv) = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.webview.as_ref()) { unsafe {
-                    if let Ok(core) = wv.controller().CoreWebView2() {
-                        let callback = webview2_com::CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |_, json| {
-                            let node = serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|v|v["backendNodeId"].as_u64()).unwrap_or(0);
-                            let _ = proxy.send_event(UserEvent::InspectNode(id, node)); Ok(())
-                        }));
-                        let params = serde_json::json!({"x":x,"y":y,"includeUserAgentShadowDOM":true}).to_string();
-                        let _ = core.CallDevToolsProtocolMethod(&windows_core::HSTRING::from("DOM.getNodeForLocation"), &windows_core::HSTRING::from(params), &callback);
-                    }
-                } }
-            },
-            UserEvent::InspectNode(id, node) => {
-                if self.debug_port==0 {return;}
-                if !self.tabs.iter().any(|t| t.id == id) { return; }
-                if id != self.active { self.activate(id); }
-                self.inspect_node = (node != 0).then_some(node);
-                self.dev_open = true; self.panel.clear(); self.layout(); self.push_state(); self.cmd(Cmd::DevConnect);
-            },
             UserEvent::ZoomChanged(id, factor) => {
                 if factor.is_finite() && factor > 0.0 && self.tabs.iter().any(|t|t.id==id) {
                     if self.zoom.get(&id).is_some_and(|old|(old-factor).abs()<0.0001) { return; }
@@ -1796,19 +1673,8 @@ impl App {
                     if id==self.active {self.request_state();}
                 }
             },
-            UserEvent::DevTarget(id, target) => {
-                if id == self.active && self.dev_open {
-                    match target.ok().and_then(|id| devtools::frontend_url(self.debug_port, &id)) {
-                        Some(mut url) => {
-                            if let Some(node) = self.inspect_node.take() { url.push_str(&format!("&lumenNode={node}")); }
-                            let _ = self.dev.load_url(&url);
-                        },
-                        None => { let _ = self.dev.evaluate_script("window.devtoolsError('Не удалось подключить страницу. Используйте отдельный инспектор или перезапустите Lumen.')"); },
-                    }
-                }
-            },
-            UserEvent::DevResult(s) => { if let Ok(j) = serde_json::to_string(&s) { let _ = self.dev.evaluate_script(&format!("window.onDevResult({j})")); } },
             UserEvent::Pulse => {
+                if self.incognito { return; }
                 if !self.window.is_minimized() && !self.fullscreen {
                     if let Ok(p) = self.window.inner_position() {
                         transfer::publish(self.incognito, p.x, p.y, self.window.inner_size().width, (40.0 * self.window.scale_factor()) as u32);
@@ -1823,6 +1689,7 @@ impl App {
                         else { self.cmd(Cmd::CloseTab { id }); }
                     } else if self.transferring[&id].elapsed() > Duration::from_secs(5) {
                         self.transferring.remove(&id);
+                        transfer::cancel(id);
                         self.toast("Окно не ответило. Вкладка осталась здесь.");
                     }
                 }
@@ -1893,7 +1760,6 @@ impl App {
                     let _ = wv.load_url(&u);
                 }
             }
-            UserEvent::NewTab(u) => self.new_tab(Some(u)),
             UserEvent::PopupTab(source,url,foreground) => {
                 if !safe_url(&url){return;}
                 let id=self.next_id;
@@ -1999,7 +1865,7 @@ impl App {
                             let path = if dir.parent() == Some(self.ext_dir.as_path()) { name } else { dir.to_string_lossy().into_owned() };
                             self.ext_map.insert(id, path);
                             if let Ok(j) = serde_json::to_string(&self.ext_map) {
-                                let _ = fs::write(&self.ext_map_path, j);
+                                let _ = crate::security::atomic_write(&self.ext_map_path, j.as_bytes());
                             }
                         }
                         "Расширение установлено. Обновите открытые страницы.".to_string()
@@ -2109,6 +1975,69 @@ mod regression_tests {
         }
     }
     #[test]
+    #[ignore = "Requires the native WebView2 runtime"]
+    fn start_page_csp_allows_search_and_blocks_inline_injection() {
+        use tao::platform::{run_return::EventLoopExtRunReturn, windows::EventLoopBuilderExtWindows};
+        let token = crate::security::newtab_token();
+        let html = NEWTAB_HTML.replace("__NEWTAB_TOKEN__", &token)
+            .replace("__INC__", "0").replace("__THEME__", "dark").replace("__BGATTR__", "0")
+            .replace("/*__LINKS__*/[]", r#"[{"t":"Fixture","u":"https://example.com/"}]"#);
+        let mut events = EventLoopBuilder::<u8>::with_user_event().with_any_thread(true).build();
+        let window = WindowBuilder::new().with_visible(false).build(&events).unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let mut context = WebContext::new(Some(profile.path().join("profile")));
+        let messages = events.create_proxy();
+        let navigation = events.create_proxy();
+        let allowed = html.clone();
+        let _view = WebViewBuilder::with_web_context(&mut context)
+            .with_devtools(false)
+            .with_bounds(Rect {
+                position: PhysicalPosition::new(0, 0).into(),
+                size: PhysicalSize::new(640, 400).into(),
+            })
+            .with_on_page_load_handler(move |event, _| {
+                if matches!(event, PageLoadEvent::Finished) { let _ = messages.send_event(0); }
+            })
+            .with_navigation_handler(move |url| {
+                if url::Url::parse(&url).is_ok_and(|u|crate::security::newtab_request(&u,&token)) {
+                    let _ = navigation.send_event(2);
+                    return false;
+                }
+                crate::security::internal_document(&url, &allowed)
+            })
+            .with_html(html)
+            .build_as_child(&window).unwrap();
+        let evaluation = events.create_proxy();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut result = 0;
+        events.run_return(|event, _, flow| {
+            *flow = ControlFlow::WaitUntil(deadline);
+            if let Event::UserEvent(value) = event {
+                if value == 0 {
+                    let proxy = evaluation.clone();
+                    _view.evaluate_script_with_callback(r#"
+                        (() => {
+                            const script = document.createElement('script');
+                            script.textContent = 'window.injected = true';
+                            document.body.append(script);
+                            const ready = document.querySelector('#tiles a.tile')?.textContent.includes('Fixture');
+                            document.querySelector('input[name=q]').value = 'probe';
+                            document.querySelector('main form').requestSubmit();
+                            return !!ready && !window.injected;
+                        })()
+                    "#, move |result| {
+                        let _ = proxy.send_event(if result == "true" {1} else {3});
+                    }).unwrap();
+                }
+                if value == 3 { *flow = ControlFlow::Exit; return; }
+                result |= value;
+            }
+            if result == 3 || Instant::now() >= deadline { *flow = ControlFlow::Exit; }
+        });
+        assert_eq!(result, 3, "expected rendered links, blocked injection and search submission");
+    }
+
+    #[test]
     fn dock_fits_small_windows_and_scales_with_dpi() {
         assert_eq!(dock_width(1280, 1.0, 400.0), 400);
         assert_eq!(dock_width(2560, 2.0, 400.0), 800);
@@ -2140,7 +2069,6 @@ mod regression_tests {
 struct Cli {
     incognito: bool,
     secondary: bool,
-    developer: bool,
     restart_after: Option<u32>,
     restore_session: bool,
     url: Option<String>,
@@ -2163,7 +2091,6 @@ fn parse_cli() -> Cli {
             "--" => { c.url=a.get(i+1).cloned(); break; },
             "--incognito" => c.incognito = true,
             "--secondary" => c.secondary = true,
-            "--developer-mode" => c.developer = true,
             "--restore-session" => c.restore_session = true,
             "--restart-after" => {i+=1;c.restart_after=a.get(i).and_then(|v|v.parse().ok());},
             "--url" => {
@@ -2238,12 +2165,18 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
         .expect("не удалось создать WebView2");
     let mut capture_stop=Arc::new(AtomicBool::new(false));
     let mut audio_rx=None;
+    let mut last_prompt: Option<Instant> = None;
     event_loop.run(move |event, _, flow| {
         use base64::Engine;
         if let Event::UserEvent(message)=&event {
             if let Ok(value)=serde_json::from_str::<serde_json::Value>(message) {
                 match value["cmd"].as_str() {
                     Some("capture_start") => {
+                        use windows::{core::w,Win32::{Foundation::HWND, UI::WindowsAndMessaging::{MessageBoxW,MB_YESNO,MB_ICONQUESTION,MB_DEFBUTTON2,IDYES}}};
+                        if audio_rx.is_some() || last_prompt.is_some_and(|t|t.elapsed()<Duration::from_secs(5)){return;}
+                        last_prompt=Some(Instant::now());
+                        let choice=unsafe{MessageBoxW(HWND(window.hwnd() as _),w!("Разрешить Shazam захват системного звука на 20 секунд? Будет слышен звук других приложений."),w!("Lumen — доступ к звуку"),MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2)};
+                        if choice!=IDYES{let _=webview.evaluate_script("window.__lumenAudioEnd()");return;}
                         capture_stop.store(true,Ordering::Relaxed);
                         capture_stop=Arc::new(AtomicBool::new(false));
                         let(tx,rx)=mpsc::sync_channel(32);audio_rx=Some(rx);
@@ -2255,6 +2188,7 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
             }
         }
         *flow = if audio_rx.is_some() { ControlFlow::WaitUntil(Instant::now()+Duration::from_millis(20)) } else { ControlFlow::Wait };
+        let mut ended=false;
         if let Some(rx)=&audio_rx { for packet in rx.try_iter().take(16) {
             match packet {
                 capture::Packet::Audio(rate,samples)=>{
@@ -2263,9 +2197,10 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
                     let _=webview.evaluate_script(&format!("window.__lumenAudio({rate},'{b64}')"));
                 },
                 capture::Packet::Error(error)=>{let _=webview.evaluate_script(&format!("window.__lumenAudioError({})",serde_json::to_string(&error).unwrap()));}
-                capture::Packet::End=>{let _=webview.evaluate_script("window.__lumenAudioEnd()");}
+                capture::Packet::End=>{ended=true;let _=webview.evaluate_script("window.__lumenAudioEnd()");}
             }
         }}
+        if ended {audio_rx=None;}
         let _ = &webview;
         if let Event::WindowEvent { event: we, .. } = event {
             match we {
@@ -2277,6 +2212,7 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
 }
 
 fn main() {
+    if crate::updater::helper_mode() { return; }
     if sys::cleanup_mode() { return; }
     if matches!(std::env::args().nth(1).as_deref(),Some("--register-browser"|"--default-browser")) {
         let settings=std::env::args().nth(1).as_deref()==Some("--default-browser");
@@ -2308,7 +2244,7 @@ fn main() {
     let _ = fs::create_dir_all(&ext_dir);
 
     let settings_path = dir.join("settings.json");
-    let settings: Settings = fs::read_to_string(&settings_path)
+    let settings: Settings = crate::security::read_profile_text(&settings_path,1048576)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
@@ -2317,37 +2253,29 @@ fn main() {
             let _ = crate::security::atomic_write(&settings_path,&data);
         }
     }
-    let debugging_profile = if incognito { std::env::temp_dir().join(format!("Lumen-incognito-{}", std::process::id())) } else { dir.join("profile") };
-    let developer = cli.developer || std::env::var("LUMEN_ENABLE_CDP").as_deref()==Ok("1");
-    let debug_port = if developer {devtools::port(&debugging_profile)} else {0};
-    if developer {std::env::set_var("LUMEN_ENABLE_CDP","1");}
-    let args = browser_args(settings.eco, debug_port);
+    let args = browser_args(settings.eco);
+    std::env::remove_var("WEBVIEW2_PIPE_FOR_SCRIPT_DEBUGGER");
+    std::env::remove_var("WEBVIEW2_WAIT_FOR_SCRIPT_DEBUGGER");
     // WebView2 can ignore the debugging switch in per-controller options.
     // Set it before creating any environment; only this process and its children
     // inherit it, never the user's global Windows environment.
     std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", &args);
 
-    if let Some(url) = cli.popup.clone().filter(|u| safe_url(u)) {
-        run_popup(url, cli.size.unwrap_or((470.0, 620.0)), cli.pos, args, dir.join("profile"), settings.theme.clone());
+    if let Some(url) = cli.popup.clone() {
+        if !incognito && url.starts_with("chrome-extension://") && safe_url(&url) {
+            run_popup(url, cli.size.unwrap_or((470.0, 620.0)), cli.pos, args, dir.join("profile"), settings.theme.clone());
+        }
         return;
     }
-
-    let profile_dir = if incognito {
-        std::env::temp_dir().join(format!("Lumen-incognito-{}", std::process::id()))
-    } else {
-        dir.join("profile")
-    };
-
-    let links_path = dir.join("links.json");
-    let session_path = dir.join("session.json");
-    let ext_map_path = dir.join("ext_map.json");
-
-    // история
+    let profile_dir=if incognito {std::env::temp_dir().join(format!("Lumen-incognito-{}",std::process::id()))}else{dir.join("profile")};
+    let links_path=dir.join("links.json");
+    let session_path=dir.join("session.json");
+    let ext_map_path=dir.join("ext_map.json");
     let history_path = dir.join("history.jsonl");
     let mut history: Vec<HistEntry> = if incognito {
         Vec::new()
     } else {
-        fs::read_to_string(&history_path)
+        crate::security::read_profile_text(&history_path,8388608)
             .map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
             .unwrap_or_default()
     };
@@ -2356,19 +2284,19 @@ fn main() {
         history.drain(..cut);
     }
 
-    let links: Vec<Link> = fs::read_to_string(&links_path)
+    let links: Vec<Link> = crate::security::read_profile_text(&links_path,524288)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     let session: Session = if incognito || secondary {
         Session::default()
     } else {
-        fs::read_to_string(&session_path)
+        crate::security::read_profile_text(&session_path,2097152)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     };
-    let ext_map: HashMap<String, String> = fs::read_to_string(&ext_map_path)
+    let ext_map: HashMap<String, String> = crate::security::read_profile_text(&ext_map_path,524288)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
@@ -2376,7 +2304,7 @@ fn main() {
 
     // своя фотография для главного экрана
     let bg_path = dir.join("background.txt");
-    let bg_data = fs::read_to_string(&bg_path)
+    let bg_data = crate::security::read_profile_text(&bg_path,4000000)
         .ok()
         .filter(|d| crate::security::image_data(d));
 
@@ -2419,7 +2347,7 @@ fn main() {
         .with_visible(false)
         .with_window_icon(icon)
         .with_decorations(false) // вкладки и кнопки окна рисует сам браузер
-        .with_title(format!("Lumen 0.4.7{}{}",if incognito {" — Инкогнито"} else {""},if developer {" — Режим разработчика (CDP)"} else {""}))
+        .with_title(format!("Lumen {}{}",env!("CARGO_PKG_VERSION"),if incognito {" — Инкогнито"} else {""}))
         .with_inner_size(tao::dpi::LogicalSize::new(1280.0, 800.0))
         .with_min_inner_size(tao::dpi::LogicalSize::new(480.0, 320.0));
     if let Some((x, y)) = cli.pos {
@@ -2451,7 +2379,7 @@ fn main() {
     let p_ui = proxy.clone();
     let p_ready = proxy.clone();
     let ui = WebViewBuilder::with_web_context(&mut ctx)
-        .with_devtools(cfg!(debug_assertions))
+        .with_devtools(false)
         .with_incognito(incognito)
         .with_browser_extensions_enabled(!incognito) // у всех WebView одного профиля параметры должны совпадать
         .with_additional_browser_args(&args) // у всех WebView одного профиля аргументы должны совпадать
@@ -2488,43 +2416,16 @@ fn main() {
         } else { false }
     });
 
-    let p_dev = proxy.clone();
-    let p_dev_ready = proxy.clone();
-    let p_dev_link = proxy.clone();
-    let dev = WebViewBuilder::with_web_context(&mut ctx)
-        .with_initialization_script(include_str!("devtools-theme.js"))
-        .with_navigation_handler(move |url| devtools::navigation_allowed(debug_port, &url))
-        .with_new_window_req_handler(move |url| {
-            if url.starts_with("https://") || url.starts_with("http://") { let _ = p_dev_link.send_event(UserEvent::NewTab(url)); }
-            false
-        })
-        .with_incognito(incognito)
-        .with_browser_extensions_enabled(!incognito)
-        .with_additional_browser_args(&args)
-        .with_html(DEV_HTML)
-        .with_visible(false)
-        .with_bounds(content_rect(&window))
-        .with_on_page_load_handler(move |ev, _| { if matches!(ev, PageLoadEvent::Finished) { let _ = p_dev_ready.send_event(UserEvent::Ui(r#"{"cmd":"ready"}"#.into())); } })
-        .with_ipc_handler(move |req: wry::http::Request<String>| {
-            if devtools::navigation_allowed(debug_port,&req.uri().to_string()) && crate::security::dev_command(req.body()) {
-                let _ = p_dev.send_event(UserEvent::Ui(req.body().clone()));
-            }
-        })
-        .build_as_child(&window).expect("не удалось создать боковую панель");
-
     let download_proxy=proxy.clone();
     let downloads=crate::downloads::Manager::new(&dir,incognito,move||download_proxy.send_event(UserEvent::DownloadPoll).is_ok());
     let mut app = App {
+        newtab_token: crate::security::newtab_token(),
         popup_tabs: HashMap::new(),
         download_hosts: Vec::new(),
         favicons:Rc::new(RefCell::new(favicon::Cache::default())),
         sent_icons:RefCell::new(std::collections::HashSet::new()),
         downloads,
-        debug_port,
         frame_dark: matches!(window.theme(), tao::window::Theme::Dark),
-        dev,
-        dev_open: false,
-        dev_width: 560.0,
         fullscreen_keys: Arc::new(AtomicBool::new(false)),
         transferring: HashMap::new(),
         fullscreen: false,
@@ -2554,7 +2455,6 @@ fn main() {
         ext_dir,
         music: MusicState::new("idle"),
         stats: Arc::new(hook::Stats::new()),
-        inspect_node: None,
         links,
         links_path,
         closed: Vec::new(),
@@ -2579,12 +2479,19 @@ fn main() {
     app.spawn_filters(false);
     if std::env::var_os("LUMEN_TEST_HIDDEN").is_none() { animate_window(&app.window, true); }
 
+    let updates=crate::updater::start(!incognito && !secondary);
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } | Event::UserEvent(UserEvent::Quit) => {
                 animate_window(&app.window, false);
-                transfer::cleanup();
+                if !app.incognito {
+                    for id in app.transferring.keys().copied() { transfer::cancel(id); }
+                    transfer::cleanup();
+                }
+                if app.downloads.borrow().active_count()==0 {
+                    if let Ok(update)=updates.try_recv(){let _=update.apply();}
+                }
                 if app.incognito {
                     app.tabs.clear();
                     schedule_cleanup(&app.profile_dir);

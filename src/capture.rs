@@ -19,10 +19,10 @@ pub fn start(tx: SyncSender<Packet>, stop: Arc<AtomicBool>) {
             }.map_err(|e|e.to_string())?;
             stream.play().map_err(|e|e.to_string())?;
             let began=std::time::Instant::now();
-            while !stop.load(Ordering::Relaxed) && began.elapsed().as_secs()<60 {std::thread::sleep(std::time::Duration::from_millis(20));}
+            while !stop.load(Ordering::Relaxed) && began.elapsed().as_secs()<20 {std::thread::sleep(std::time::Duration::from_millis(20));}
             drop(stream);Ok(())
         })();
         if let Err(error)=result {let _=tx.try_send(Packet::Error(error));}
-        let _=tx.try_send(Packet::End);
+        let _=tx.send(Packet::End);
     });
 }

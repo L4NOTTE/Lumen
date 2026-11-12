@@ -6,6 +6,8 @@
 
 ## Возможности и отличия
 
+В 0.4.8 отключены DevTools и запросы разрешений сайтов. Пользовательская установка в ~/.local/bin/lumen проверяет подписанные обновления через /usr/bin/curl. Системный пакет обновляется через менеджер пакетов.
+
 Перенесены общий интерфейс, вкладки и плавная перестановка внутри окна, адресная строка и поиск, история, быстрые ссылки, темы/шрифты/фон, масштаб по сайтам, восстановление сеанса и инкогнито. Добавлена обработка fullscreen-событий страниц и размещение WebKit Inspector в боковой GTK-панели.
 
 | Возможность | Windows | Linux preview |
@@ -39,6 +41,41 @@ sudo apt install ./lumen_0.4.6_amd64.deb
 В меню появится **Lumen**. Браузер по умолчанию автоматически не меняется. При сбое графического теста workflow сохраняет журнал `lumen-linux-diagnostics`; успешный пакет при ошибке не публикуется. Windows собирается отдельно через `build-windows`.
 
 ## Локальная сборка
+
+### Установка из GitHub через Git
+
+Этот способ собирает текущую Linux preview на WebKitGTK. Он **не добавляет** поддержку Chrome-расширений: отдельный Chromium-прототип ещё проходит проверку совместимости.
+
+На Ubuntu 24.04 / Linux Mint 22 сначала установите инструменты и системные библиотеки:
+
+```bash
+sudo apt update
+sudo apt install git curl build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libx11-dev libxrandr-dev libxkbcommon-dev libwayland-dev gstreamer1.0-libav gstreamer1.0-plugins-good
+```
+
+Нужны установленные `cargo` и `rustc` (Rust stable). Если их нет, установите Rust по инструкции https://rustup.rs/ и откройте терминал заново. Если библиотеки уже установлены, последующие команды не требуют sudo:
+
+```bash
+git clone https://github.com/L4NOTTE/Lumen.git
+cd Lumen
+bash tools/install-linux.sh --check
+bash tools/install-linux.sh
+```
+
+Скрипт собирает Rust-код с `--locked`, устанавливает бинарник в `~/.local/bin/lumen`, иконку и пункт меню — в `~/.local/share`. Профиль и браузер по умолчанию не меняются. Запуск: меню **Lumen** или `~/.local/bin/lumen`.
+
+Обновление из того же каталога:
+
+```bash
+git pull --ff-only
+bash tools/install-linux.sh
+```
+
+Сначала закройте Lumen. Если Git сообщает о ваших локальных изменениях, сохраните их перед обновлением; `reset --hard` не нужен. Не запускайте сборку через sudo.
+
+Скрипт должен быть загружен в репозиторий вместе с исходниками. До этого `git clone` скачает текущую опубликованную версию без нового установщика. Нативный запуск этого установщика здесь не проверен (Windows без WSL); он требует проверки на Ubuntu/Mint.
+
+### Ручная сборка и пакет
 
 Нужен Rust stable и пакеты разработки GTK 3 / WebKitGTK 4.1. [Пакет WebKitGTK для Ubuntu 24.04](https://packages.ubuntu.com/en/noble-updates/libwebkit2gtk-4.1-dev).
 

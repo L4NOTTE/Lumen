@@ -1,6 +1,6 @@
 [package]
 name = "lumen"
-version = "0.4.6"
+version = "0.4.11"
 edition = "2021"
 description = "Lumen — браузер для Windows и Linux на Rust"
 
@@ -14,21 +14,22 @@ urlencoding = "2"
 dirs = "5"
 base64 = "0.22"
 tempfile = "3"
+sha2 = "0.10"
+ring = "0.17"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
-sha2 = "0.10"
-ring = "0.17"
 spki = { version = "0.7", features = ["std"] }
 zip = { version = "9.5", default-features = false, features = ["deflate"] }
 webview2-com = "0.33"
 windows-core = "0.58"
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_UI_Shell", "Win32_System_Threading"] }
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_UI_Shell", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
 cpal = "0.15"
 winreg = "0.56"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 gtk = "0.18"
 gdk = "0.18"
 webkit2gtk = { version = "=2.0.1", features = ["v2_38"] }

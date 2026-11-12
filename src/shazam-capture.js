@@ -23,9 +23,4 @@
  };
  if(!chrome.tabCapture)chrome.tabCapture={};chrome.tabCapture.capture=capture;
  addEventListener('pagehide',stop);addEventListener('beforeunload',stop);
- // The popup was opened explicitly from Lumen's extension button. Start once,
- // after Shazam's React UI is ready; never click history/delete controls.
- let autoStarted=false;
- const auto=()=>{if(autoStarted||active)return;const logo=document.querySelector('svg.BJ6G5IZZlwRqJcpMnRZt, .UzFtPrKfFvs2DkfORpRs svg');if(logo){autoStarted=true;logo.dispatchEvent(new MouseEvent('click',{bubbles:true}));}};
- addEventListener('DOMContentLoaded',()=>{auto();const observer=new MutationObserver(()=>{auto();if(autoStarted)observer.disconnect();});observer.observe(document.body,{childList:true,subtree:true});setTimeout(()=>observer.disconnect(),10000);});
 })();

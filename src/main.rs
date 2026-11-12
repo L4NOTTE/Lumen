@@ -8,6 +8,9 @@ include!("windows_main.rs");
 
 mod downloads;
 mod security;
+mod updater;
+#[cfg(any(target_os="linux",test))]
+mod linux_desktop;
 
 #[cfg(target_os = "linux")]
 mod blocker;

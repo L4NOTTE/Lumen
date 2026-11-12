@@ -98,7 +98,7 @@ impl Manager {
         let mut records: Vec<Record> = if private {
             Vec::new()
         } else {
-            fs::read(&history)
+            crate::security::read_profile(&history,4*1024*1024)
                 .ok()
                 .and_then(|b| serde_json::from_slice(&b).ok())
                 .unwrap_or_default()
@@ -215,7 +215,7 @@ impl Manager {
         if self.private {
             return;
         }
-        let mut all: HashMap<String, Record> = fs::read(&self.history)
+        let mut all: HashMap<String, Record> = crate::security::read_profile(&self.history,4*1024*1024)
             .ok()
             .and_then(|b| serde_json::from_slice::<Vec<Record>>(&b).ok())
             .unwrap_or_default()
@@ -229,12 +229,7 @@ impl Manager {
         rows.sort_by(|a, b| b.created.cmp(&a.created));
         rows.truncate(200);
         if let Ok(data) = serde_json::to_vec(&rows) {
-            let temp = self
-                .history
-                .with_extension(format!("{}.tmp", std::process::id()));
-            if fs::write(&temp, data).is_ok() {
-                let _ = fs::rename(temp, &self.history);
-            }
+            let _ = crate::security::atomic_write(&self.history, &data);
         }
     }
     pub fn poll(&mut self) -> bool {
@@ -301,10 +296,9 @@ impl Manager {
     pub fn clear(&mut self) {
         self.records.retain(|r| r.status == "running");
         if !self.private {
-            let _ = fs::write(
-                &self.history,
-                serde_json::to_vec(&self.records).unwrap_or_default(),
-            );
+            if let Ok(data)=serde_json::to_vec(&self.records) {
+                let _=crate::security::atomic_write(&self.history,&data);
+            }
         }
     }
     pub fn open_folder(&self) {

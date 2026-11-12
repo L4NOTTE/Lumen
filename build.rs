@@ -1,8 +1,8 @@
-fn main() {
+fn hash_scripts(name: &str) {
     use base64::Engine;
     use sha2::{Digest, Sha256};
-    println!("cargo:rerun-if-changed=ui/ui.html");
-    let html = std::fs::read_to_string("ui/ui.html")
+    println!("cargo:rerun-if-changed=ui/{name}");
+    let html = std::fs::read_to_string(format!("ui/{name}"))
         .expect("UI source")
         .replace("\r\n", "\n");
     let mut hashes = Vec::new();
@@ -20,10 +20,15 @@ fn main() {
         1,
     );
     std::fs::write(
-        std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("ui.html"),
+        std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join(name),
         html,
     )
     .unwrap();
+}
+
+fn main() {
+    hash_scripts("ui.html");
+    hash_scripts("newtab.html");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=lumen.rc");
         println!("cargo:rerun-if-changed=assets/lumen.ico");

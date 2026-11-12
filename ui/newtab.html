@@ -2,6 +2,8 @@
 <html lang="ru" data-incognito="__INC__" data-theme="__THEME__" data-bg="__BGATTR__">
 <head>
 <meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action https://lumen.invalid; base-uri 'none'; object-src 'none'">
 <title>Новая вкладка</title>
 <style>
   :root { --acc-l:#4f46e5; --acc-d:#8b8dff; --font:'Segoe UI Variable','Segoe UI',system-ui,sans-serif; --fs:13px;
@@ -80,6 +82,7 @@
 <main>
   <h1><b>L</b>UMEN</h1>
   <form action="https://lumen.invalid/s" method="get">
+    <input type="hidden" name="nonce" value="__NEWTAB_TOKEN__">
     <input name="q" placeholder="Поиск или адрес сайта" autofocus autocomplete="off" spellcheck="false">
   </form>
   <div id="tiles"></div>
@@ -93,14 +96,16 @@
     <div class="btns"><button type="button" id="dc">Отмена</button><button type="submit" class="ok">Добавить</button></div>
   </form>
 </div>
+<script type="application/json" id="lumen-links">/*__LINKS__*/[]</script>
 <script>
-  const LINKS = /*__LINKS__*/[];
+  const LINKS = JSON.parse(document.getElementById('lumen-links').textContent);
   const INC = document.documentElement.dataset.incognito === '1';
   document.getElementById('t').innerHTML = INC
     ? '🕶 Режим инкогнито<br>История, куки и кэш не сохраняются и удаляются после закрытия окна'
     : 'Быстро. Тихо. Без рекламы.';
 
-  const cmd = (path, params) => { location.href = 'https://lumen.invalid/' + path + '?' + new URLSearchParams(params).toString(); };
+  const token = document.querySelector('input[name="nonce"]').value;
+  const cmd = (path, params) => { location.href = 'https://lumen.invalid/' + path + '?' + new URLSearchParams({...params, nonce: token}).toString(); };
   const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const tiles = document.getElementById('tiles');
   if (!INC) {
@@ -112,11 +117,9 @@
       const ic = document.createElement('span'); ic.className = 'ic';
       ic.style.background = `linear-gradient(135deg,hsl(${hue(host)},62%,52%),hsl(${(hue(host) + 40) % 360},62%,42%))`;
       ic.textContent = (l.t || host || '?').trim().charAt(0).toUpperCase();
-      const img = new Image(); img.alt = ''; img.src = 'https://' + host + '/favicon.ico';
-      img.onload = () => { if (img.naturalWidth > 15) ic.append(img); };
       const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = l.t || host;
       const del = document.createElement('button'); del.className = 'del'; del.type = 'button'; del.textContent = '✕'; del.title = 'Удалить';
-      del.onclick = (e) => { e.preventDefault(); e.stopPropagation(); cmd('del', { i }); };
+      del.onclick = (e) => { e.preventDefault(); e.stopPropagation(); cmd('del', { i: l.i ?? i }); };
       a.append(ic, nm, del); tiles.append(a);
     });
     const add = document.createElement('button'); add.className = 'tile add'; add.type = 'button';
