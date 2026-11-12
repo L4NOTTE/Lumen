@@ -17,12 +17,27 @@ pub fn cleanup_mode() -> bool {
     let Ok(pid) = args[3].to_string_lossy().parse::<u32>() else {
         return true;
     };
+    use windows::Win32::{
+        Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
+        System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_ACCESS_RIGHTS},
+    };
+    if pid == 0 || pid == std::process::id() { return true; }
+    let synchronize = PROCESS_ACCESS_RIGHTS(0x0010_0000);
+    match unsafe { OpenProcess(synchronize, false, pid) } {
+        Ok(process) => {
+            let result = unsafe { WaitForSingleObject(process, u32::MAX) };
+            let _ = unsafe { CloseHandle(process) };
+            if result != WAIT_OBJECT_0 { return true; }
+        }
+        Err(error) if error.code() == windows::core::HRESULT::from_win32(ERROR_INVALID_PARAMETER.0) => {}
+        Err(_) => return true,
+    }
     let Ok(root) = std::env::temp_dir().canonicalize() else {
         return true;
     };
     let requested = std::path::PathBuf::from(&args[2]);
-    for _ in 0..12 {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+    for attempt in 0..12 {
+        if attempt > 0 { std::thread::sleep(std::time::Duration::from_secs(1)); }
         let Ok(path) = requested.canonicalize() else {
             return true;
         };
@@ -31,7 +46,8 @@ pub fn cleanup_mode() -> bool {
         {
             return true;
         }
-        if std::fs::symlink_metadata(&requested).is_ok_and(|m| m.file_type().is_symlink()) {
+        use std::os::windows::fs::MetadataExt;
+        if !std::fs::symlink_metadata(&requested).is_ok_and(|m| m.is_dir() && m.file_attributes() & 0x400 == 0) {
             return true;
         }
         // remove_dir_all does not follow child symlinks. The final absolute root
@@ -42,15 +58,14 @@ pub fn cleanup_mode() -> bool {
     }
     true
 }
-pub fn schedule_cleanup(path: &Path) {
-    if let Ok(exe) = std::env::current_exe() {
-        let _ = Command::new(exe)
-            .arg("--cleanup-profile")
-            .arg(path)
-            .arg(std::process::id().to_string())
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn();
-    }
+pub fn schedule_cleanup(path: &Path) -> std::io::Result<()> {
+    Command::new(std::env::current_exe()?)
+        .arg("--cleanup-profile")
+        .arg(path)
+        .arg(std::process::id().to_string())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()?;
+    Ok(())
 }
 
 pub fn hidden(program: &str) -> Command {

@@ -29,6 +29,7 @@ fn hash_scripts(name: &str) {
 fn main() {
     hash_scripts("ui.html");
     hash_scripts("newtab.html");
+    hash_scripts("audio-consent.html");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rerun-if-changed=lumen.rc");
         println!("cargo:rerun-if-changed=assets/lumen.ico");

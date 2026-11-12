@@ -5,7 +5,6 @@ mod crx;
 mod filters;
 mod hook;
 mod capture;
-mod music;
 mod sys;
 mod transfer;
 mod default_browser;
@@ -27,7 +26,6 @@ use std::{
 use blocker::Blocker;
 use filters::{selectors_to_css, Filters};
 use hook::SharedFilters;
-use music::MusicState;
 use serde::{Deserialize, Serialize};
 use tao::{
     event::{Event, WindowEvent},
@@ -366,7 +364,6 @@ enum UserEvent {
 #[derive(Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Cmd {
-    WinResize { edge: String },
     FrameTheme { dark: bool },
     ZoomIn, ZoomOut, ZoomReset, DevTools, Fullscreen, Escape,
     DownloadAction { id: String, action: String },
@@ -394,8 +391,6 @@ enum Cmd {
     ClearBackground,
     SetAdblockLevel { level: String },
     UpdateFilters,
-    Recognize,
-    SetMusic {},
     ExtOpenDir,
     ExtInstall { input: String },
     ExtToggle { id: String, on: bool },
@@ -461,7 +456,6 @@ struct App {
     bg_data: Option<String>,
     bg_path: PathBuf,
     incognito: bool,
-    profile_dir: PathBuf,
     blocker: Rc<Blocker>,
     adblock: Arc<AtomicBool>,
     proxy: EventLoopProxy<UserEvent>,
@@ -470,7 +464,6 @@ struct App {
     lists_dir: PathBuf,
     user_filters_dir: PathBuf,
     ext_dir: PathBuf,
-    music: MusicState,
     stats: Arc<hook::Stats>,
     links: Vec<Link>,
     links_path: PathBuf,
@@ -504,10 +497,17 @@ fn animate_window(w: &Window, show: bool) {
     }
 }
 
-/// Отступ от края окна: по нему окно без рамки можно растягивать мышью (в развёрнутом виде не нужен).
+/// Keep the native resize hit area uncovered by child WebViews.
 fn inset_px(w: &Window) -> u32 {
-    let _ = w;
-    0
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXPADDEDBORDER, SM_CXFRAME, SM_CYFRAME,
+    };
+    if w.is_maximized() || w.fullscreen().is_some() || !w.is_resizable() { return 0; }
+    let hit_area = unsafe {
+        GetSystemMetrics(SM_CXFRAME).min(GetSystemMetrics(SM_CYFRAME))
+            + GetSystemMetrics(SM_CXPADDEDBORDER)
+    };
+    ((5.0 * w.scale_factor()).round() as u32).min(hit_area.max(1) as u32)
 }
 
 #[cfg(test)]
@@ -531,16 +531,23 @@ fn ui_rect(w: &Window) -> Rect {
     let i = inset_px(w);
     Rect {
         position: PhysicalPosition::new(i as i32, i as i32).into(),
-        size: PhysicalSize::new(sz.width.saturating_sub(2 * i), toolbar_px(w).min(sz.height)).into(),
+        size: PhysicalSize::new(sz.width.saturating_sub(2 * i), toolbar_px(w).min(sz.height.saturating_sub(2 * i))).into(),
     }
 }
 
-fn full_rect(w: &Window) -> Rect {
+fn panel_rect(w: &Window) -> Rect {
     let sz = w.inner_size();
     let i = inset_px(w);
     Rect {
         position: PhysicalPosition::new(i as i32, i as i32).into(),
         size: PhysicalSize::new(sz.width.saturating_sub(2 * i), sz.height.saturating_sub(2 * i)).into(),
+    }
+}
+
+fn full_rect(w: &Window) -> Rect {
+    Rect {
+        position: PhysicalPosition::new(0, 0).into(),
+        size: w.inner_size().into(),
     }
 }
 
@@ -558,10 +565,6 @@ fn window_bg(w: &Window, theme: &str, incognito: bool) -> (u8, u8, u8, u8) {
 }
 
 /// Удаляет временный профиль инкогнито уже после выхода процесса.
-fn schedule_cleanup(dir: &PathBuf) {
-    sys::schedule_cleanup(dir);
-}
-
 impl App {
     fn resolve(&self, text: &str) -> String {
         let t = text.trim();
@@ -607,7 +610,7 @@ impl App {
         if t.url.len()>8192 || !crate::security::web_link(&t.url) {
             return;
         }
-        let (u, title) = (t.url.clone(), t.title.chars().take(512).collect());
+        let (u, title) = (crate::security::persisted_url(&t.url), t.title.chars().take(512).collect());
         let ts = now_secs();
         if let Some(last) = self.history.last_mut() {
             if last.u == u && ts.saturating_sub(last.ts) < 30 {
@@ -737,9 +740,8 @@ impl App {
             .with_document_title_changed_handler(move |t: String| {
                 let _ = p_title.send_event(UserEvent::Title(id, t));
             })
-            .with_on_page_load_handler(move |ev: PageLoadEvent, u: String| {
+            .with_on_page_load_handler(move |ev: PageLoadEvent, _: String| {
                 let started = matches!(ev, PageLoadEvent::Started);
-                let _ = p_url.send_event(UserEvent::Url(id, u));
                 let _ = p_url.send_event(UserEvent::Loading(id, started));
             })
             .with_new_window_req_handler(move |u: String| {
@@ -818,6 +820,13 @@ impl App {
         };
         let wv = b.build_as_child(&self.window).expect("не удалось создать WebView2");
         hook::lock_down(&wv).expect("site privacy policy");
+        let source_proxy = self.proxy.clone();
+        let _ = hook::install_source_changed(&wv, move |url| {
+            let _ = source_proxy.send_event(UserEvent::Url(id, url));
+        });
+        if let Some(url) = hook::source(&wv).filter(|url| safe_url(url)) {
+            let _ = self.proxy.send_event(UserEvent::Url(id, url));
+        }
         let _ = crate::downloads::install(&wv, &self.downloads);
         let committed=self.proxy.clone();let download=self.proxy.clone();
         let _=hook::install_popup_outcome(&wv,
@@ -914,7 +923,7 @@ impl App {
         let page_rect=if self.fullscreen {full_rect(&self.window)} else {content_rect(&self.window)};
         let _ = self.ui.set_visible(!self.fullscreen);
         // при открытой панели интерфейс занимает всё окно, а страница скрыта
-        let _ = self.ui.set_bounds(if open { full_rect(&self.window) } else { ui_rect(&self.window) });
+        let _ = self.ui.set_bounds(if open { panel_rect(&self.window) } else { ui_rect(&self.window) });
         for t in self.tabs.iter_mut() {
             if let Some(wv) = &t.webview {
                 let visible = t.id == self.active && !open;
@@ -999,8 +1008,6 @@ impl App {
                     Vec::new()
                 },
             },
-            "developer_mode": false,
-            "music_cfg": { "token": "", "source": "system" },
         });
         let serialized = state.to_string();
         let changed = *self.last_ui_state.borrow() != serialized;
@@ -1062,7 +1069,7 @@ impl App {
         let real: Vec<&Tab> = self.tabs.iter().filter(|t| t.url.starts_with("http")).collect();
         let session = Session {
             active: real.iter().position(|t| t.id == self.active).unwrap_or(0),
-            tabs: real.iter().map(|t| SavedTab { u: t.url.clone(), t: t.title.clone() }).collect(),
+            tabs: real.iter().map(|t| SavedTab { u: crate::security::persisted_url(&t.url), t: t.title.clone() }).collect(),
         };
         if let Ok(j) = serde_json::to_string(&session) {
             if *self.last_session.borrow() != j {
@@ -1234,12 +1241,6 @@ impl App {
         });
     }
 
-    fn push_music(&self) {
-        if let Ok(j) = serde_json::to_string(&self.music) {
-            let _ = self.ui.evaluate_script(&format!("window.onMusic({j})"));
-        }
-    }
-
     fn rebuild_tabs(&mut self) {
         let old: Vec<(u32, String, bool)> = self
             .tabs
@@ -1300,13 +1301,15 @@ impl App {
             return;
         }
         match c {
-            Cmd::WinResize { edge } => {
-                use tao::window::ResizeDirection::*;
-                let direction = match edge.as_str() { "n" => North, "ne" => NorthEast, "nw" => NorthWest, "e" => East, "w" => West, _ => return };
-                let _ = self.window.drag_resize_window(direction);
-            },
             Cmd::FrameTheme { dark } => {self.frame_dark=dark;self.update_window_bg();},
-            Cmd::DevTools => self.toast("Инструменты разработчика отключены"),
+            Cmd::DevTools => {
+                if self.incognito { return; }
+                self.with_active(|wv| {
+                    if hook::open_devtools(wv).is_err() {
+                        self.toast("Не удалось открыть инспектор WebView2");
+                    }
+                });
+            }
             Cmd::ZoomIn => self.change_zoom(1),
             Cmd::ZoomOut => self.change_zoom(-1),
             Cmd::ZoomReset => self.change_zoom(0),
@@ -1398,7 +1401,6 @@ impl App {
                         "downloads" => self.push_downloads(),
                         "history" => self.push_history(),
                         "ext" => self.refresh_ext(),
-                        "music" => self.push_music(),
                         _ => {}
                     }
                 }
@@ -1487,9 +1489,6 @@ impl App {
                     self.push_state();
                 }
             }
-            Cmd::Recognize | Cmd::SetMusic { .. } => {
-                self.toast("Распознавание доступно через расширение Shazam");
-            }
             Cmd::ExtOpenDir => {
                 let _ = fs::create_dir_all(&self.ext_dir);
                 let _ = std::process::Command::new("explorer.exe").arg(&self.ext_dir).spawn();
@@ -1571,16 +1570,17 @@ impl App {
             }
             Cmd::DetachTab { id, x, y } => {
                 if self.incognito { self.toast("Перенос вкладок недоступен в инкогнито"); return; }
+                let Some(tab) = self.tabs.iter().find(|tab| tab.id == id) else { return; };
+                let url = tab.webview.as_ref().and_then(hook::source)
+                    .map(|url| if safe_url(&url) { url } else { String::new() })
+                    .unwrap_or_else(|| tab.url.clone());
                 if let Some(pid) = transfer::target(self.incognito, x, y) {
-                    if let Some(tab) = self.tabs.iter().find(|t| t.id == id) {
-                        if !self.transferring.contains_key(&id) && transfer::send(pid, id, &tab.url) {
-                            self.transferring.insert(id, Instant::now());
-                        }
+                    if !self.transferring.contains_key(&id) && transfer::send(pid, id, &url) {
+                        self.transferring.insert(id, Instant::now());
                     }
                     return;
                 }
                 if self.tabs.len() > 1 {
-                    let url = self.tabs.iter().find(|t| t.id == id).map(|t| t.url.clone()).unwrap_or_default();
                     if let Ok(exe) = std::env::current_exe() {
                         let mut c = std::process::Command::new(exe);
                         c.arg("--secondary");
@@ -1714,8 +1714,14 @@ impl App {
             UserEvent::Url(id, u) => {
                 let u = if u.starts_with("about:") || u.starts_with("data:") { String::new() } else { u };
                 if let Some(tab) = self.tabs.iter_mut().find(|x| x.id == id && x.webview.is_some()) {
-                    if zoom_key(&tab.url)!=zoom_key(&u){tab.favicon.clear();}
+                    if tab.url == u { return; }
+                    let origin_changed = zoom_key(&tab.url) != zoom_key(&u);
                     tab.url = u;
+                    if !origin_changed {
+                        self.request_state();
+                        return;
+                    }
+                    tab.favicon.clear();
                     let factor = zoom_key(&tab.url).and_then(|key|self.settings.site_zoom.get(&key).copied())
                         .filter(|factor|factor.is_finite() && (0.25..=5.0).contains(factor)).unwrap_or(1.0);
                     self.zoom.insert(id,factor);
@@ -1976,6 +1982,52 @@ mod regression_tests {
     }
     #[test]
     #[ignore = "Requires the native WebView2 runtime"]
+    fn webview_leaves_all_native_window_resize_handles_reachable() {
+        use tao::platform::windows::EventLoopBuilderExtWindows;
+        use windows::Win32::{
+            Foundation::{HWND, LPARAM, POINT, WPARAM},
+            Graphics::Gdi::ClientToScreen,
+            UI::WindowsAndMessaging::*,
+        };
+        let event_loop = EventLoopBuilder::<()>::new().with_any_thread(true).build();
+        let window = WindowBuilder::new().with_decorations(false).with_visible(false)
+            .with_inner_size(tao::dpi::LogicalSize::new(640.0, 400.0)).build(&event_loop).unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let mut context = WebContext::new(Some(profile.path().join("profile")));
+        let _view = WebViewBuilder::with_web_context(&mut context)
+            .with_bounds(panel_rect(&window))
+            .with_html("<!doctype html><title>Resize fixture</title>")
+            .build_as_child(&window).unwrap();
+        window.set_visible(true);
+        let hwnd = HWND(window.hwnd() as _);
+        let size = window.inner_size();
+        let right = size.width as i32 - 1;
+        let bottom = size.height as i32 - 1;
+        let center = POINT { x: right / 2, y: bottom / 2 };
+        assert!(inset_px(&window) > 0);
+        assert_ne!(unsafe { ChildWindowFromPointEx(hwnd, center, CWP_SKIPINVISIBLE) }, hwnd);
+        for (x, y, expected) in [
+            (0, center.y, HTLEFT), (right, center.y, HTRIGHT),
+            (center.x, 0, HTTOP), (center.x, bottom, HTBOTTOM),
+            (0, 0, HTTOPLEFT), (right, 0, HTTOPRIGHT),
+            (0, bottom, HTBOTTOMLEFT), (right, bottom, HTBOTTOMRIGHT),
+        ] {
+            let point = POINT { x, y };
+            assert_eq!(unsafe { ChildWindowFromPointEx(hwnd, point, CWP_SKIPINVISIBLE) }, hwnd);
+            let mut screen = point;
+            assert!(unsafe { ClientToScreen(hwnd, &mut screen) }.as_bool());
+            let packed = u32::from(screen.x as u16) | (u32::from(screen.y as u16) << 16);
+            let hit = unsafe { SendMessageW(hwnd, WM_NCHITTEST, WPARAM(0), LPARAM(packed as isize)) };
+            assert_eq!(hit.0, expected as isize, "resize hit at ({x}, {y})");
+        }
+        window.set_maximized(true);
+        assert_eq!(inset_px(&window), 0);
+        window.set_fullscreen(Some(tao::window::Fullscreen::Borderless(window.current_monitor())));
+        assert_eq!(inset_px(&window), 0);
+    }
+
+    #[test]
+    #[ignore = "Requires the native WebView2 runtime"]
     fn start_page_csp_allows_search_and_blocks_inline_injection() {
         use tao::platform::{run_return::EventLoopExtRunReturn, windows::EventLoopBuilderExtWindows};
         let token = crate::security::newtab_token();
@@ -2035,6 +2087,220 @@ mod regression_tests {
             if result == 3 || Instant::now() >= deadline { *flow = ControlFlow::Exit; }
         });
         assert_eq!(result, 3, "expected rendered links, blocked injection and search submission");
+    }
+
+    #[test]
+    #[ignore = "Requires the native WebView2 runtime"]
+    fn same_document_url_and_native_inspector() {
+        use tao::platform::{run_return::EventLoopExtRunReturn, windows::EventLoopBuilderExtWindows};
+        use std::{io::{Read, Write}, net::TcpListener};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/watch?v=old", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request);
+            let html = "<!doctype html><title>Lumen inspector fixture</title>";
+            let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{html}", html.len());
+        });
+        let mut events = EventLoopBuilder::<String>::with_user_event().with_any_thread(true).build();
+        let window = WindowBuilder::new().with_visible(false).build(&events).unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let mut context = WebContext::new(Some(profile.path().join("profile")));
+        let loaded = events.create_proxy();
+        let view = WebViewBuilder::with_web_context(&mut context)
+            .with_devtools(false)
+            .with_on_page_load_handler(move |event, _| {
+                if matches!(event, PageLoadEvent::Finished) {
+                    let _ = loaded.send_event(String::new());
+                }
+            })
+            .with_url(&url)
+            .build_as_child(&window).unwrap();
+        hook::lock_down(&view).unwrap();
+        let changed = events.create_proxy();
+        hook::install_source_changed(&view, move |source| { let _ = changed.send_event(source); }).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(12);
+        let mut checked = false;
+        events.run_return(|event, _, flow| {
+            *flow = ControlFlow::WaitUntil(deadline);
+            if let Event::UserEvent(source) = event {
+                if source.is_empty() {
+                    view.evaluate_script("history.pushState(null, '', '/watch?v=latest')").unwrap();
+                } else if source.ends_with("/watch?v=latest") {
+                    assert_eq!(hook::source(&view).as_deref(), Some(source.as_str()));
+                    hook::open_devtools(&view).unwrap();
+                    checked = true;
+                    *flow = ControlFlow::Exit;
+                }
+            }
+            if Instant::now() >= deadline { *flow = ControlFlow::Exit; }
+        });
+        assert!(checked, "WebView2 must report the new URL after history.pushState");
+    }
+
+    #[test]
+    #[ignore = "Requires the native WebView2 runtime"]
+    fn settings_and_downloads_render_in_webview() {
+        use tao::platform::{run_return::EventLoopExtRunReturn, windows::EventLoopBuilderExtWindows};
+        let mut events = EventLoopBuilder::<Option<bool>>::with_user_event().with_any_thread(true).build();
+        let window = WindowBuilder::new().with_visible(false).build(&events).unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let mut context = WebContext::new(Some(profile.path().join("profile")));
+        let loaded = events.create_proxy();
+        let view = WebViewBuilder::with_web_context(&mut context)
+            .with_on_page_load_handler(move |event, _| {
+                if matches!(event, PageLoadEvent::Finished) { let _ = loaded.send_event(None); }
+            })
+            .with_ipc_handler(|_| {})
+            .with_html(UI_HTML)
+            .build_as_child(&window).unwrap();
+        let result = events.create_proxy();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut passed = false;
+        events.run_return(|event, _, flow| {
+            *flow = ControlFlow::WaitUntil(deadline);
+            match event {
+                Event::UserEvent(None) => {
+                    let result = result.clone();
+                    view.evaluate_script_with_callback(r#"
+                        (() => {
+                            const fixture = {
+                                platform: 'windows', tabs: [], panel: 'settings', engine: 'google',
+                                set: { theme: 'dark', accent: '#456789' },
+                                look: { al: '#456789', ad: '#456789', font: 'sans-serif', fs: 13 },
+                                filters: { level: 'basic' }, block: { count: 0, recent: [] }
+                            };
+                            window.onState(fixture);
+                            const color = document.getElementById('accenthex').value === '#456789';
+                            const settings = !document.getElementById('p-settings').hidden;
+                            window.onState({ ...fixture, panel: 'downloads' });
+                            window.onDownloads([
+                                { id: 'running', name: 'one', path: 'one', status: 'running' },
+                                { id: 'done', name: 'two', path: 'two', status: 'completed' }
+                            ]);
+                            const actions = id => [...document.querySelectorAll('[data-download-id=' + id + '] button:not([hidden])')].map(x => x.textContent);
+                            return color && settings && !document.getElementById('devbtn').hidden
+                                && !document.getElementById('p-downloads').hidden
+                                && actions('running').includes('Отменить')
+                                && !actions('running').includes('Удалить из списка')
+                                && actions('done').includes('Удалить из списка');
+                        })()
+                    "#, move |value| { let _ = result.send_event(Some(value == "true")); }).unwrap();
+                }
+                Event::UserEvent(Some(result)) => {
+                    passed = result;
+                    *flow = ControlFlow::Exit;
+                }
+                _ => {}
+            }
+            if Instant::now() >= deadline { *flow = ControlFlow::Exit; }
+        });
+        assert!(passed, "settings and download controls must render");
+    }
+
+    #[test]
+    #[ignore = "Requires the native WebView2 runtime"]
+    fn shazam_consent_is_a_separate_child_of_the_popup() {
+        use tao::platform::{run_return::EventLoopExtRunReturn, windows::EventLoopBuilderExtWindows};
+        let mut events = EventLoopBuilder::<String>::with_user_event().with_any_thread(true).build();
+        let window = WindowBuilder::new().with_visible(false).build(&events).unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let mut context = WebContext::new(Some(profile.path().join("profile")));
+        let args = browser_args(false);
+        let page = WebViewBuilder::with_web_context(&mut context)
+            .with_browser_extensions_enabled(true)
+            .with_additional_browser_args(&args)
+            .with_html("<!doctype html><title>Popup fixture</title>")
+            .build_as_child(&window).unwrap();
+        let consent = build_audio_consent(&mut context, &window, &args, events.create_proxy());
+        layout_extension_popup(&window, &page, Some(&consent), true);
+
+        let proxy = events.create_proxy();
+        let start = Instant::now();
+        let mut evaluated = false;
+        let mut ready = false;
+        let mut blocked = true;
+        events.run_return(|event, _, flow| {
+            *flow = ControlFlow::WaitUntil(start + Duration::from_millis(if evaluated { 1200 } else { 500 }));
+            if !evaluated && start.elapsed() >= Duration::from_millis(500) {
+                evaluated = true;
+                let proxy = proxy.clone();
+                consent.evaluate_script_with_callback(
+                    "Boolean(document.getElementById('approve')?.click() === undefined && document.getElementById('deny') && window.ipc)",
+                    move |result| { let _ = proxy.send_event(result); },
+                ).unwrap();
+            }
+            if let Event::UserEvent(message) = event {
+                ready |= message == "true";
+                blocked &= message != "approve-audio";
+            }
+            if start.elapsed() >= Duration::from_millis(1200) { *flow = ControlFlow::Exit; }
+        });
+        assert!(ready && blocked, "consent controls must load and reject synthetic approval");
+    }
+
+    #[test]
+    #[ignore = "Requires the native WebView2 runtime"]
+    fn shazam_library_label_and_arrow_follow_popup_theme() {
+        use tao::platform::{run_return::EventLoopExtRunReturn, windows::EventLoopBuilderExtWindows};
+        let mut events = EventLoopBuilder::<u8>::with_user_event().with_any_thread(true).build();
+        let window = WindowBuilder::new().with_visible(false).build(&events).unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let mut context = WebContext::new(Some(profile.path().join("profile")));
+        let loaded = events.create_proxy();
+        let theme = include_str!("shazam-theme.js").replace(
+            "if(location.protocol!=='chrome-extension:'||location.hostname!=='mmioliijnhnoblpgimnlajmefafdfilb')return;",
+            "",
+        );
+        let view = WebViewBuilder::with_web_context(&mut context)
+            .with_initialization_script("window.__lumenPopupTheme = 'dark';")
+            .with_initialization_script(&theme)
+            .with_on_page_load_handler(move |event, _| {
+                if matches!(event, PageLoadEvent::Finished) { let _ = loaded.send_event(0); }
+            })
+            .with_html(r#"<!doctype html><style>.mfXuTaLWnnw65XOyBQDy{color:#000}</style>
+                <div class="S4Qz81BGxxpjuGEo02kM">
+                    <svg id="chevron"><g fill="black"><path d="M0 0L10 10"/></g></svg>
+                    <p class="mfXuTaLWnnw65XOyBQDy">Песни</p>
+                </div>"#)
+            .build_as_child(&window).unwrap();
+        let proxy = events.create_proxy();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut passed = false;
+        events.run_return(|event, _, flow| {
+            *flow = ControlFlow::WaitUntil(deadline);
+            match event {
+                Event::UserEvent(0) => {
+                    let proxy = proxy.clone();
+                    view.evaluate_script_with_callback(r#"
+                        (() => {
+                            const root = document.documentElement;
+                            const label = document.querySelector('p');
+                            const arrow = document.querySelector('#chevron path');
+                            const uses = rgb => getComputedStyle(label).color === rgb
+                                && getComputedStyle(arrow).fill === rgb;
+                            const dark = uses('rgb(230, 231, 234)');
+                            root.dataset.lumenTheme = 'light';
+                            return dark && uses('rgb(31, 35, 40)');
+                        })()
+                    "#, move |value| { let _ = proxy.send_event(if value == "true" {1} else {2}); }).unwrap();
+                }
+                Event::UserEvent(result) => { passed = result == 1; *flow = ControlFlow::Exit; }
+                _ => {}
+            }
+            if Instant::now() >= deadline { *flow = ControlFlow::Exit; }
+        });
+        assert!(passed, "Shazam history label and chevron must follow the theme");
+    }
+
+    #[test]
+    fn extension_popup_fits_work_area() {
+        assert_eq!(fit_popup_axis(0, 1920, 1760, 470), (1450, 470));
+        assert_eq!(fit_popup_axis(-1920, 0, -180, 705), (-705, 705));
+        assert_eq!(fit_popup_axis(40, 440, 100, 620), (40, 400));
+        assert_eq!(fit_popup_axis(0, 1040, 900, 650), (390, 650));
     }
 
     #[test]
@@ -2138,11 +2404,13 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
         .with_window_icon(icon)
         .with_title("Lumen — расширение")
         .with_inner_size(tao::dpi::LogicalSize::new(size.0, size.1))
-        .with_always_on_top(true);
+        .with_always_on_top(true)
+        .with_visible(false);
     if let Some((x, y)) = pos {
         wb = wb.with_position(tao::dpi::PhysicalPosition::new(x, y));
     }
     let window = wb.build(&event_loop).expect("не удалось создать окно");
+    fit_extension_popup(&window, pos);
     let mut ctx = WebContext::new(Some(profile));
     let webview = WebViewBuilder::with_web_context(&mut ctx)
         .with_initialization_script(include_str!("extension-theme.js"))
@@ -2153,7 +2421,11 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
         .with_new_window_req_handler(|_|false)
         .with_ipc_handler(move |req:wry::http::Request<String>| {
             if keep_open && req.body().len()<4096 && crate::security::extension_origin(&req.uri().to_string(),"mmioliijnhnoblpgimnlajmefafdfilb") {
-                let _=capture_proxy.send_event(req.body().clone());
+                if serde_json::from_str::<serde_json::Value>(req.body()).ok().is_some_and(|value|
+                    matches!(value["cmd"].as_str(), Some("capture_start" | "capture_stop")))
+                {
+                    let _ = capture_proxy.send_event(req.body().clone());
+                }
             }
         })
         .with_devtools(false)
@@ -2161,33 +2433,58 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
         .with_browser_extensions_enabled(true)
         .with_additional_browser_args(&args)
         .with_url(&url)
-        .build(&window)
+        .build_as_child(&window)
         .expect("не удалось создать WebView2");
+    let consent = keep_open.then(|| build_audio_consent(&mut ctx, &window, &args, event_loop.create_proxy()));
+    layout_extension_popup(&window, &webview, consent.as_ref(), false);
+    window.set_visible(true);
     let mut capture_stop=Arc::new(AtomicBool::new(false));
     let mut audio_rx=None;
-    let mut last_prompt: Option<Instant> = None;
+    let mut pending_consent: Option<Instant> = None;
     event_loop.run(move |event, _, flow| {
         use base64::Engine;
         if let Event::UserEvent(message)=&event {
+            if matches!(message.as_str(), "approve-audio" | "deny-audio")
+                && pending_consent.is_some_and(|deadline| Instant::now() < deadline)
+            {
+                pending_consent = None;
+                layout_extension_popup(&window, &webview, consent.as_ref(), false);
+                let _ = webview.focus();
+                if message == "approve-audio" {
+                    capture_stop = Arc::new(AtomicBool::new(false));
+                    let (tx, rx) = mpsc::sync_channel(32);
+                    audio_rx = Some(rx);
+                    capture::start(tx, capture_stop.clone());
+                } else {
+                    let _ = webview.evaluate_script("window.__lumenAudioEnd()");
+                }
+            }
             if let Ok(value)=serde_json::from_str::<serde_json::Value>(message) {
                 match value["cmd"].as_str() {
-                    Some("capture_start") => {
-                        use windows::{core::w,Win32::{Foundation::HWND, UI::WindowsAndMessaging::{MessageBoxW,MB_YESNO,MB_ICONQUESTION,MB_DEFBUTTON2,IDYES}}};
-                        if audio_rx.is_some() || last_prompt.is_some_and(|t|t.elapsed()<Duration::from_secs(5)){return;}
-                        last_prompt=Some(Instant::now());
-                        let choice=unsafe{MessageBoxW(HWND(window.hwnd() as _),w!("Разрешить Shazam захват системного звука на 20 секунд? Будет слышен звук других приложений."),w!("Lumen — доступ к звуку"),MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2)};
-                        if choice!=IDYES{let _=webview.evaluate_script("window.__lumenAudioEnd()");return;}
-                        capture_stop.store(true,Ordering::Relaxed);
-                        capture_stop=Arc::new(AtomicBool::new(false));
-                        let(tx,rx)=mpsc::sync_channel(32);audio_rx=Some(rx);
-                        capture::start(tx,capture_stop.clone());
-                    },
-                    Some("capture_stop")=>{capture_stop.store(true,Ordering::Relaxed);audio_rx=None;},
+                    Some("capture_start") if audio_rx.is_none() && pending_consent.is_none() && consent.is_some() => {
+                        pending_consent = Some(Instant::now() + Duration::from_secs(15));
+                        layout_extension_popup(&window, &webview, consent.as_ref(), true);
+                    }
+                    Some("capture_stop") => {
+                        capture_stop.store(true, Ordering::Relaxed);
+                        audio_rx = None;
+                        pending_consent = None;
+                        layout_extension_popup(&window, &webview, consent.as_ref(), false);
+                    }
                     _=>{}
                 }
             }
         }
-        *flow = if audio_rx.is_some() { ControlFlow::WaitUntil(Instant::now()+Duration::from_millis(20)) } else { ControlFlow::Wait };
+        if pending_consent.is_some_and(|deadline| Instant::now() >= deadline) {
+            pending_consent = None;
+            layout_extension_popup(&window, &webview, consent.as_ref(), false);
+            let _ = webview.evaluate_script("window.__lumenAudioEnd()");
+        }
+        *flow = if audio_rx.is_some() {
+            ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(20))
+        } else {
+            pending_consent.map_or(ControlFlow::Wait, ControlFlow::WaitUntil)
+        };
         let mut ended=false;
         if let Some(rx)=&audio_rx { for packet in rx.try_iter().take(16) {
             match packet {
@@ -2205,10 +2502,78 @@ fn run_popup(url: String, size: (f64, f64), pos: Option<(i32, i32)>, args: Strin
         if let Event::WindowEvent { event: we, .. } = event {
             match we {
                 WindowEvent::CloseRequested => {capture_stop.store(true,Ordering::Relaxed);*flow = ControlFlow::Exit;},
+                WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                    layout_extension_popup(&window, &webview, consent.as_ref(), pending_consent.is_some());
+                }
                 _ => {}
             }
         }
     });
+}
+
+fn fit_popup_axis(start: i32, end: i32, position: i32, size: i32) -> (i32, i32) {
+    let available = end.saturating_sub(start).max(1);
+    let size = size.clamp(1, available);
+    (position.clamp(start, start.saturating_add(available - size)), size)
+}
+
+fn fit_extension_popup(window: &Window, requested: Option<(i32, i32)>) {
+    use windows::Win32::{
+        Foundation::{HWND, POINT},
+        Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST},
+        UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER},
+    };
+    let Ok(outer) = window.outer_position() else { return; };
+    let (x, y) = requested.unwrap_or((outer.x, outer.y));
+    let hwnd = HWND(window.hwnd() as _);
+    let monitor = unsafe { MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST) };
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() { return; }
+    let area = info.rcWork;
+    let size = window.outer_size();
+    let (x, width) = fit_popup_axis(area.left, area.right, x, size.width as i32);
+    let (y, height) = fit_popup_axis(area.top, area.bottom, y, size.height as i32);
+    let _ = unsafe { SetWindowPos(hwnd, None, x, y, width, height, SWP_NOACTIVATE | SWP_NOZORDER) };
+}
+
+fn layout_extension_popup(window: &Window, page: &WebView, consent: Option<&WebView>, asking: bool) {
+    let size = window.inner_size();
+    let strip = if asking { ((108.0 * window.scale_factor()) as u32).min(size.height / 2) } else { 0 };
+    let bounds = |y: u32, height: u32| Rect {
+        position: PhysicalPosition::new(0, y as i32).into(),
+        size: PhysicalSize::new(size.width.max(1), height.max(1)).into(),
+    };
+    let _ = page.set_bounds(bounds(strip, size.height.saturating_sub(strip)));
+    if let Some(consent) = consent {
+        if asking { let _ = consent.set_bounds(bounds(0, strip)); }
+        let _ = consent.set_visible(asking);
+    }
+}
+
+fn build_audio_consent(
+    context: &mut WebContext, window: &Window, args: &str, proxy: EventLoopProxy<String>,
+) -> WebView {
+    const HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/audio-consent.html"));
+    WebViewBuilder::with_web_context(context)
+        .with_devtools(false)
+        .with_browser_extensions_enabled(true)
+        .with_additional_browser_args(args)
+        .with_visible(false)
+        .with_new_window_req_handler(|_| false)
+        .with_navigation_handler(|url| crate::security::internal_document(&url, HTML))
+        .with_ipc_handler(move |request| {
+            if crate::security::internal_document(&request.uri().to_string(), HTML)
+                && matches!(request.body().as_str(), "approve-audio" | "deny-audio")
+            {
+                let _ = proxy.send_event(request.body().clone());
+            }
+        })
+        .with_html(HTML)
+        .build_as_child(window)
+        .expect("не удалось создать панель доступа к звуку")
 }
 
 fn main() {
@@ -2268,6 +2633,13 @@ fn main() {
         return;
     }
     let profile_dir=if incognito {std::env::temp_dir().join(format!("Lumen-incognito-{}",std::process::id()))}else{dir.join("profile")};
+    if incognito {
+        fs::create_dir(&profile_dir).expect("не удалось создать отдельный приватный профиль");
+        if let Err(error) = sys::schedule_cleanup(&profile_dir) {
+            let _ = fs::remove_dir(&profile_dir);
+            panic!("не удалось запустить очистку приватного профиля: {error}");
+        }
+    }
     let links_path=dir.join("links.json");
     let session_path=dir.join("session.json");
     let ext_map_path=dir.join("ext_map.json");
@@ -2279,6 +2651,14 @@ fn main() {
             .map(|s| s.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
             .unwrap_or_default()
     };
+    if !incognito && !secondary {
+        let mut changed = false;
+        for entry in &mut history { changed |= crate::security::redact_persisted_url(&mut entry.u); }
+        if changed {
+            let cleaned: Vec<_> = history.iter().filter_map(|entry| serde_json::to_string(entry).ok()).collect();
+            let _ = crate::security::atomic_write(&history_path, format!("{}\n", cleaned.join("\n")).as_bytes());
+        }
+    }
     if history.len() > HISTORY_MAX {
         let cut = history.len() - HISTORY_MAX;
         history.drain(..cut);
@@ -2288,7 +2668,7 @@ fn main() {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
-    let session: Session = if incognito || secondary {
+    let mut session: Session = if incognito || secondary {
         Session::default()
     } else {
         crate::security::read_profile_text(&session_path,2097152)
@@ -2296,6 +2676,15 @@ fn main() {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default()
     };
+    if !incognito && !secondary {
+        let mut changed = false;
+        for entry in &mut session.tabs { changed |= crate::security::redact_persisted_url(&mut entry.u); }
+        if changed {
+            if let Ok(data) = serde_json::to_vec(&session) {
+                let _ = crate::security::atomic_write(&session_path, &data);
+            }
+        }
+    }
     let ext_map: HashMap<String, String> = crate::security::read_profile_text(&ext_map_path,524288)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -2445,7 +2834,6 @@ fn main() {
         bg_data,
         bg_path,
         incognito,
-        profile_dir,
         blocker: Rc::new(Blocker::load(&filters_dir)),
         proxy,
         filters: Rc::new(RefCell::new(None)),
@@ -2453,7 +2841,6 @@ fn main() {
         lists_dir,
         user_filters_dir: filters_dir,
         ext_dir,
-        music: MusicState::new("idle"),
         stats: Arc::new(hook::Stats::new()),
         links,
         links_path,
@@ -2494,7 +2881,6 @@ fn main() {
                 }
                 if app.incognito {
                     app.tabs.clear();
-                    schedule_cleanup(&app.profile_dir);
                 }
                 *flow = ControlFlow::Exit
             }

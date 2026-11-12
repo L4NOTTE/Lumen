@@ -17,7 +17,7 @@ use tao::{
     platform::unix::WindowExtUnix,
     window::{Fullscreen, Window, WindowBuilder},
 };
-use webkit2gtk::{WebInspectorExt as _, WebViewExt as _};
+use webkit2gtk::{SettingsExt as _, WebInspectorExt as _, WebViewExt as _};
 use wry::{
     dpi::{LogicalPosition, LogicalSize},
     PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder, WebViewBuilderExtUnix,
@@ -275,7 +275,7 @@ impl App {
                     .iter()
                     .map(|t| Link {
                         t: t.title.clone(),
-                        u: t.url.clone(),
+                        u: crate::security::persisted_url(&t.url),
                     })
                     .collect(),
             },
@@ -544,7 +544,7 @@ impl App {
         let (al, ad) = accent(&c.accent);
         let tabs:Vec<_>=self.tabs.iter().map(|t|json!({"id":t.id,"title":t.title,"url":t.url,"loading":t.loading,"sleeping":false})).collect();
         let s=json!({"download_count":self.downloads.borrow().active_count(),"platform":"linux","version":env!("CARGO_PKG_VERSION"),"tabs":tabs,"active":self.active,"zoom":self.tab().map(|t|(t.zoom*100.0).round()).unwrap_or(100.0),"panel":self.panel,"dev_open":self.dev,"maximized":self.window.is_maximized(),"incognito":self.private,"engine":c.engine,"adblock":c.adblock,
-          "set":{"theme":c.theme,"accent":c.accent,"font":c.font,"font_size":c.font_size,"bg_mode":c.bg_mode,"has_bg":c.background.is_some(),"startup":c.startup,"labels":c.hide_labels,"sleep":0,"eco":false},"look":{"al":al,"ad":ad,"font":font(&c.font),"fs":font_size(&c.font_size)},"filters":{"level":"basic","status":"Базовая блокировка и скрытие рекламных карточек. Некоторые объявления могут сохраняться."},"block":{"count":0,"recent":[]},"music_cfg":{"token":"","source":"system"}}).to_string();
+          "set":{"theme":c.theme,"accent":c.accent,"font":c.font,"font_size":c.font_size,"bg_mode":c.bg_mode,"has_bg":c.background.is_some(),"startup":c.startup,"labels":c.hide_labels,"sleep":0,"eco":false},"look":{"al":al,"ad":ad,"font":font(&c.font),"fs":font_size(&c.font_size)},"filters":{"level":"basic","status":"Базовая блокировка и скрытие рекламных карточек. Некоторые объявления могут сохраняться."},"block":{"count":0,"recent":[]}}).to_string();
         if s != self.last_state {
             let _ = self.ui.evaluate_script(&format!("window.onState({s})"));
             self.last_state = s;
@@ -738,7 +738,16 @@ impl App {
             "zoom_in" => self.zoom(1),
             "zoom_out" => self.zoom(-1),
             "zoom_reset" => self.zoom(0),
-            "dev_tools" | "native_dev_tools" => self.toast("Инструменты разработчика отключены"),
+            "dev_tools" | "native_dev_tools" => {
+                if self.private { return; }
+                if let Some(tab) = self.tab() {
+                    let native = tab.wv.webview();
+                    if let (Some(settings), Some(inspector)) = (native.settings(), native.inspector()) {
+                        settings.set_enable_developer_extras(true);
+                        inspector.show();
+                    }
+                }
+            }
             "dev_close" => {
                 self.close_inspector();
                 self.layout();
@@ -750,7 +759,7 @@ impl App {
                     self.command(json!({"cmd":"dev_tools"}));
                     return;
                 }
-                if panel == "ext" || panel == "music" {
+                if panel == "ext" {
                     self.toast("Расширения Chrome и Shazam требуют Windows/WebView2");
                     return;
                 }
@@ -787,7 +796,10 @@ impl App {
                         }
                         match key {
                             "theme" => self.config.theme = value.into(),
-                            "accent" => self.config.accent = value.into(),
+                            "accent" if crate::security::hex_color(value)
+                                || matches!(value, "indigo" | "blue" | "green" | "orange" | "pink" | "red") => {
+                                self.config.accent = value.into();
+                            }
                             "font" => self.config.font = value.into(),
                             "font_size" => self.config.font_size = value.into(),
                             "bg_mode" => self.config.bg_mode = value.into(),
@@ -854,7 +866,7 @@ impl App {
                     if safe(&t.url) {
                         self.links.push(Link {
                             t: t.title.clone(),
-                            u: t.url.clone(),
+                            u: crate::security::persisted_url(&t.url),
                         });
                         self.save();
                         self.refresh_newtabs();
@@ -1005,7 +1017,7 @@ impl App {
                     if !loading && !self.private && safe(&t.url) {
                         self.history.push(History {
                             t: t.title.clone(),
-                            u: t.url.clone(),
+                            u: crate::security::persisted_url(&t.url),
                             ts: SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap_or_default()
@@ -1115,16 +1127,28 @@ pub fn run() {
     let mut config: Config = read(dir.join("settings.json"));
     config.background = config.background.filter(|data|crate::security::image_data(data));
     let links: Vec<Link> = read(dir.join("links.json"));
-    let history = if private {
+    let mut history: Vec<History> = if private {
         Vec::new()
     } else {
         read(dir.join("history.json"))
     };
-    let session: Session = if private || smoke {
+    let mut session: Session = if private || smoke {
         Session::default()
     } else {
         read(dir.join("session.json"))
     };
+    if !private && !smoke {
+        let mut history_changed = false;
+        for entry in &mut history {
+            history_changed |= crate::security::redact_persisted_url(&mut entry.u);
+        }
+        if history_changed { write(dir.join("history.json"), &history); }
+        let mut session_changed = false;
+        for entry in &mut session.tabs {
+            session_changed |= crate::security::redact_persisted_url(&mut entry.u);
+        }
+        if session_changed { write(dir.join("session.json"), &session); }
+    }
     let event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
     let proxy = event_loop.create_proxy();
     let window = WindowBuilder::new()

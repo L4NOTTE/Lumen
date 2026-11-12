@@ -33,6 +33,41 @@ pub fn web_link(raw: &str) -> bool {
             && url.password().is_none()
     })
 }
+/// Redact known credential fields in browser-owned URL logs and recovery files.
+pub fn persisted_url(raw: &str) -> String {
+    let Ok(mut url) = url::Url::parse(raw) else { return String::new(); };
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return String::new();
+    }
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    let mut query: Vec<_> = url.query_pairs().into_owned().collect();
+    let query_len = query.len();
+    query.retain(|(key, _)| {
+        let key: String = key.to_ascii_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        !matches!(key.as_str(), "auth" | "authorization" | "authentication" | "token" | "accesstoken"
+            | "idtoken" | "refreshtoken" | "authtoken" | "apikey" | "code" | "oauthcode" | "state" | "jwt" | "password"
+            | "passwd" | "secret" | "clientsecret" | "session" | "sessionid" | "sid" | "signature"
+            | "sig" | "credential" | "xamzsignature" | "xamzcredential" | "xamzsecuritytoken"
+            | "xgoogsignature" | "xgoogcredential" | "samlresponse" | "samlrequest" | "ticket")
+    });
+    if query_len != query.len() {
+        url.set_query(None);
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+    }
+    url.set_fragment(None);
+    url.into()
+}
+
+pub fn redact_persisted_url(value: &mut String) -> bool {
+    let cleaned = persisted_url(value);
+    if cleaned == *value { return false; }
+    *value = cleaned;
+    true
+}
+
 /// Create a private profile before reading secrets or starting a web engine.
 #[cfg(unix)]
 pub fn private_directory(path: &std::path::Path) -> std::io::Result<()> {
@@ -211,19 +246,13 @@ pub fn extension_origin(uri: &str, id: &str) -> bool {
         })
 }
 #[cfg(test)]
-pub fn dev_command(body: &str) -> bool {
-    body.len() < 4096
-        && serde_json::from_str::<serde_json::Value>(body)
-            .ok()
-            .is_some_and(|v| {
-                matches!(
-                    v["cmd"].as_str(),
-                    Some("ready" | "dev_close" | "dev_connect" | "dev_width" | "native_dev_tools")
-                )
-            })
-}
-#[cfg(test)]
 mod tests {
+    #[test]
+    fn browser_logs_keep_video_id_and_remove_credentials() {
+        assert_eq!(super::persisted_url("https://u:p@example.test/watch?v=123&%61uth=secret&API-Key=a&tag=a%20b#access_token=secret"), "https://example.test/watch?v=123&tag=a+b");
+        assert_eq!(super::persisted_url("https://example.test/watch?v=123&tag=a%20b"), "https://example.test/watch?v=123&tag=a%20b");
+        assert_eq!(super::persisted_url("data:text/plain,secret"), "");
+    }
     #[test]
     fn profile_read_rejects_oversized_files_and_directories() {
         let dir = tempfile::tempdir().unwrap();
@@ -342,8 +371,6 @@ mod tests {
         ] {
             assert!(!extension_origin(&uri, id));
         }
-        assert!(dev_command(r#"{"cmd":"dev_close"}"#));
-        assert!(!dev_command(r#"{"cmd":"ext_install","input":"C:\\evil"}"#));
     }
 }
 

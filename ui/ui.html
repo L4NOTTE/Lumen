@@ -108,27 +108,10 @@
   .erow b { flex:1; font-weight:500; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   a.lnk { color:var(--acc); cursor:pointer; text-decoration:underline; }
 
-  /* распознавание музыки */
-  .mic { position:relative; width:120px; height:120px; margin:10px auto 18px; display:grid; place-items:center; }
-  .mic b { position:relative; z-index:2; width:84px; height:84px; border-radius:50%; background:var(--acc); color:#fff; display:grid; place-items:center;
-    font-size:34px; transition:transform .25s var(--ease); }
-  .mic .ring { position:absolute; inset:18px; border-radius:50%; border:2px solid var(--acc); opacity:0; }
-  [data-st="listening"] .mic .ring { animation:ring 1.8s ease-out infinite; }
-  [data-st="listening"] .mic .r2 { animation-delay:.9s; }
-  [data-st="listening"] .mic b { animation:beat 1.2s ease-in-out infinite; }
-  [data-st="searching"] .mic b { animation:spinb 1s linear infinite; }
-  #mtitle { font-size:1.5em; font-weight:600; margin-bottom:8px; }
-  #msub { color:var(--mute); min-height:1.3em; margin-bottom:12px; }
-  #mprog { height:3px; border-radius:2px; background:var(--line); overflow:hidden; margin:0 auto 18px; max-width:320px; opacity:0; transition:opacity .2s; }
-  #mprog i { display:block; height:100%; width:100%; background:var(--acc); transform:scaleX(0); transform-origin:left; }
-  [data-st="listening"] #mprog { opacity:1; }
-  [data-st="listening"] #mprog i { animation:fill 10s linear forwards; }
-  [data-st="found"] .mic b { animation:pop .5s var(--ease); }
-  @keyframes ring { from { transform:scale(.7); opacity:.7; } to { transform:scale(1.5); opacity:0; } }
-  @keyframes beat { 50% { transform:scale(1.08); } }
-  @keyframes spinb { to { transform:rotate(360deg); } }
-  @keyframes fill { to { transform:scaleX(1); } }
-  @keyframes pop { from { transform:scale(.6); } to { transform:none; } }
+  .accent-label { display:block; margin:14px 0 7px; color:var(--mute); }
+  .accent-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .accent-controls input[type=color] { width:44px; height:36px; padding:4px; border:1px solid var(--line); border-radius:9px; background:var(--bg); cursor:pointer; }
+  .accent-controls .inp { flex:0 1 110px; min-width:92px; font-family:Consolas,monospace; }
   .chip { border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:9px; padding:8px 14px; cursor:pointer;
     transition:background-color .15s, transform .1s var(--ease), border-color .15s; }
   .chip:hover { background:var(--hover); border-color:var(--acc); }
@@ -183,13 +166,13 @@
   #toast { top:8px; max-width:calc(100vw - 24px); max-height:64px; overflow:auto; box-sizing:border-box; text-align:center; line-height:1.4; }
   @media(max-width:900px) { #engine { width:84px; } .wc button { width:36px; } #zreset { padding:6px 8px; } }
   @media(max-width:720px) { #engine,#star { display:none; } #nav{gap:2px;padding:0 5px}.btn{width:27px} .tab{min-width:52px} #logo{margin-right:3px} .tb{width:25px}.wc button{width:32px} }
-  @media(max-width:540px) { #inc,#music { display:none; } .tab{min-width:44px;padding-left:6px} .grp{padding:12px} .chip{padding:7px 9px} }
-  @media(max-height:500px) { .pin { padding-top:12px; } .ph{margin-bottom:10px} .mic{width:86px;height:86px} .mic b{width:64px;height:64px} }
+  @media(max-width:540px) { #inc { display:none; } .tab{min-width:44px;padding-left:6px} .grp{padding:12px} .chip{padding:7px 9px} }
+  @media(max-height:500px) { .pin { padding-top:12px; } .ph{margin-bottom:10px} }
 </style>
 <style>
 button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outline-offset:-3px}
 .wc button{overflow:hidden}.wc button:focus-visible{box-shadow:inset 0 0 0 2px var(--acc);outline:0}
-.resize{position:fixed;z-index:100;touch-action:none;background:transparent}.resize.n{top:0;left:5px;right:5px;height:3px;cursor:n-resize}.resize.ne{right:0;top:0;width:5px;height:5px;cursor:ne-resize}.resize.nw{left:0;top:0;width:5px;height:5px;cursor:nw-resize}.resize.e{right:0;top:5px;height:75px;width:3px;cursor:e-resize}.resize.w{left:0;top:5px;height:75px;width:3px;cursor:w-resize}body.maximized .resize{display:none}
+.resize{position:fixed;z-index:100;touch-action:none;background:transparent}.resize.n{top:0;left:5px;right:5px;height:3px;cursor:n-resize}.resize.ne{right:0;top:0;width:5px;height:5px;cursor:ne-resize}.resize.nw{left:0;top:0;width:5px;height:5px;cursor:nw-resize}.resize.e{right:0;top:5px;height:75px;width:3px;cursor:e-resize}.resize.w{left:0;top:5px;height:75px;width:3px;cursor:w-resize}body.maximized .resize,:root[data-platform=windows] .resize{display:none}
 </style>
 <style>button,button:hover,button:active,button:focus,button:focus-visible{transform:none!important;transition:none!important;box-shadow:none!important;outline:none!important}.wc{overflow:hidden}.wc button{border-radius:0!important}.btn:active,.x:active,.chip:active{transform:none!important}</style><style>
 .btn:hover,.x:hover,.wc button:hover,.wc .wx:hover{background:transparent!important}
@@ -236,7 +219,7 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
     <button class="btn" id="zout" title="Уменьшить (Ctrl+−)">−</button>
     <button class="chip" id="zreset" title="Сбросить масштаб (Ctrl+0)">100%</button>
     <button class="btn" id="zin" title="Увеличить (Ctrl++)">+</button>
-    <button class="btn" id="devbtn" hidden title="Инструменты разработчика">&lt;/&gt;</button>
+    <button class="btn" id="devbtn" title="Инструменты разработчика">&lt;/&gt;</button>
     <button class="btn" id="star" title="Добавить в быстрые ссылки (Ctrl+D)">☆</button>
     <select id="engine" title="Поисковая система">
       <option value="google">Google</option>
@@ -278,30 +261,6 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
       </div>
     </div>
 
-    <!-- РАСПОЗНАВАНИЕ МУЗЫКИ -->
-    <div class="pin" id="p-music" hidden data-st="idle">
-      <div class="ph"><h2>Распознавание музыки</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
-      <div class="grp" style="text-align:center">
-        <div class="mic"><span class="ring"></span><span class="ring r2"></span><b>🎵</b></div>
-        <div id="mtitle">Нажмите, чтобы распознать трек</div>
-        <div id="msub"></div>
-        <div id="mprog"><i></i></div>
-        <div class="row" style="justify-content:center">
-          <button class="chip" id="mgo">Слушать</button>
-          <button class="chip" id="mopen" hidden>Открыть страницу трека</button>
-        </div>
-      </div>
-      <div class="grp"><h3>Источник звука</h3>
-        <div class="segx" data-x="source"><button data-v="system">Звук системы</button><button data-v="mic">Микрофон</button></div>
-        <div class="hint">«Звук системы» распознаёт то, что играет в любом приложении или вкладке (даже в наушниках). Нужно, чтобы музыка играла во время записи.</div>
-        <h3 style="margin-top:16px">Ключ AudD API</h3>
-        <div class="row"><input class="inp" id="tok" placeholder="Вставьте ключ API" spellcheck="false" autocomplete="off">
-          <button class="chip" id="toksave">Сохранить</button></div>
-        <div class="hint">Для поиска используется сервис AudD: ключ выдаётся бесплатно для пробы на <a class="lnk" id="audlink">dashboard.audd.io</a>.
-          Короткая запись звука отправляется на сервер сервиса, больше ничего.</div>
-      </div>
-    </div>
-
     <!-- НАСТРОЙКИ -->
     <div class="pin" id="p-settings" hidden>
       <div class="ph"><h2>Настройки</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
@@ -309,12 +268,6 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
       <div class="grp"><h3>Браузер по умолчанию</h3>
         <button class="chip" id="defaultbrowser">Выбрать Lumen в Windows…</button>
         <div class="hint">Открыть системные настройки для ссылок HTTP и HTTPS. Выбор подтверждается в Windows.</div>
-      </div>
-
-      <div class="grp" hidden><h3>Инструменты разработчика</h3>
-        <div class="hint" id="devmode-status">Режим разработчика выключен.</div>
-        <button class="chip" id="devmode">Включить и перезапустить…</button>
-        <div class="hint">Боковой DevTools требует локального отладочного порта. В этом режиме другие программы на компьютере могут получить доступ к данным открытых страниц. Перед переключением закройте остальные окна Lumen и окна расширений. Вкладки этого окна восстановятся, несохранённые формы могут быть потеряны.</div>
       </div>
 
       <div class="grp"><h3>Тема</h3>
@@ -325,7 +278,13 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
       </div>
 
       <div class="grp"><h3>Акцентный цвет</h3>
-        <div class="swatches" id="sw"></div><label>Свой цвет <input type="color" id="customaccent" value="#4f46e5"></label>
+        <div class="swatches" id="sw"></div>
+        <label class="accent-label" for="accenthex">Свой цвет</label>
+        <div class="accent-controls">
+          <input type="color" id="customaccent" aria-label="Палитра акцентного цвета" value="#4f46e5">
+          <input class="inp" type="text" id="accenthex" placeholder="#4f46e5" maxlength="7" spellcheck="false" autocomplete="off">
+          <button class="chip" id="accentreset" type="button">Сбросить</button>
+        </div>
       </div>
 
       <div class="grp"><h3>Шрифт интерфейса</h3>
@@ -410,6 +369,11 @@ const frameMedia = matchMedia('(prefers-color-scheme: dark)');
 function syncFrameTheme() {
   const dark = state.incognito || state.set.theme === 'dark' || (state.set.theme !== 'light' && frameMedia.matches);
   if (dark !== lastFrameTheme) { lastFrameTheme = dark; send({cmd:'frame_theme',dark}); }
+  if (state.look) {
+    const accent = dark ? state.look.ad : state.look.al;
+    $('customaccent').value = accent;
+    if (document.activeElement !== $('accenthex')) $('accenthex').value = accent;
+  }
 }
 frameMedia.addEventListener('change',syncFrameTheme);
 let hist = [];
@@ -633,9 +597,6 @@ window.onState = (s) => {
     root.style.setProperty('--font', s.look.font); root.style.setProperty('--fs', s.look.fs + 'px');
   }
   document.body.classList.toggle('inc', !!s.incognito);
-  $('devmode-status').textContent = s.developer_mode ? 'Режим разработчика включён. Локальный CDP доступен.' : 'Режим разработчика выключен. Отладочный порт закрыт.';
-  $('devmode').textContent = s.developer_mode ? 'Выключить и перезапустить…' : 'Включить и перезапустить…';
-  $('devmode').disabled = !!s.incognito;
 
   const box = $('tabs'), plus = $('plus');
   const ids = new Set(s.tabs.map((t) => t.id));
@@ -678,8 +639,9 @@ window.onState = (s) => {
 
   // панели
   $('panel').hidden = !s.panel || s.panel === 'dev';
+  $('devbtn').hidden = !!s.incognito;
   $('devbtn').classList.toggle('on', !!s.dev_open);
-  for (const n of ['history', 'settings', 'ext', 'music', 'downloads']) $('p-' + n).hidden = s.panel !== n;
+  for (const n of ['history', 'settings', 'ext', 'downloads']) $('p-' + n).hidden = s.panel !== n;
   $('zreset').textContent = (s.zoom || 100) + '%';
   $('hist').classList.toggle('on', s.panel === 'history');
   $('downloadsbtn').classList.toggle('on', s.panel === 'downloads');
@@ -689,11 +651,11 @@ window.onState = (s) => {
   $('extbtn').classList.toggle('on', s.panel === 'ext');
   if (s.panel && s.panel !== lastPanel) { $('panel').style.animation = 'none'; $('panel').offsetHeight; $('panel').style.animation = ''; }
   lastPanel = s.panel;
-  const settingsState = JSON.stringify([s.set,s.filters,s.music_cfg,s.block,s.maximized,s.adblock]);
+  const settingsState = JSON.stringify([s.set,s.filters,s.look,s.block,s.maximized,s.adblock]);
   if (settingsState === lastSettingsState) return;
   lastSettingsState = settingsState;
 
-  // блокировка рекламы и распознавание музыки
+  // блокировка рекламы
   document.querySelectorAll('.segx[data-x="level"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.filters.level));
   $('fstat').textContent = s.platform === 'linux' ? s.filters.status : s.filters.level === 'strong' ? s.filters.status : 'Базовый режим: встроенный список доменов, без загрузки фильтров.';
   $('updf').hidden = s.filters.level !== 'strong';
@@ -708,14 +670,11 @@ window.onState = (s) => {
   $('bstat').textContent = 'Заблокировано запросов с запуска: ' + s.block.count;
   if (s.panel === 'settings') $('blog').textContent = s.block.recent.length ? s.block.recent.join('\n') : 'Пока ничего (откройте сайт и вернитесь)';
   $('shield').title = (s.adblock ? 'Блокировка рекламы: включена' : 'Блокировка рекламы: выключена') + (s.platform === 'linux' ? '' : ' • заблокировано: ' + s.block.count);
-  document.querySelectorAll('.segx[data-x="source"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.music_cfg.source));
-  if (document.activeElement !== $('tok')) $('tok').value = s.music_cfg.token;
 
   // элементы настроек
   document.querySelectorAll('.seg').forEach((seg) => {
     seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set[seg.dataset.k]));
   });
-  if (/^#[0-9a-f]{6}$/i.test(s.set.accent)) $('customaccent').value = s.set.accent;
   $('sw').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set.accent));
   $('font').value = s.set.font;
   $('tiles').querySelectorAll('.tile').forEach((t) => {
@@ -745,14 +704,14 @@ function renderDownloads() {
       const icon=document.createElement('div');icon.className='dl-symbol';icon.innerHTML='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 13h8m-8 4h5"/></svg>';
       const body=document.createElement('div'),name=document.createElement('div'),path=document.createElement('div'),bar=document.createElement('progress'),meta=document.createElement('div'),actions=document.createElement('div');
       name.className='dl-name';path.className='dl-path';bar.className='dl-progress';meta.className='dl-meta';actions.className='dl-actions';bar.max=100;bar.setAttribute('aria-label','Прогресс загрузки');
-      const buttons={};for(const [action,label] of [['open','Открыть'],['folder','Папка'],['cancel','Отмена']]){const b=document.createElement('button');b.className='chip';b.textContent=label;b.onclick=()=>send({cmd:'download_action',id:r.id,action});buttons[action]=b;actions.append(b)}
+      const buttons={};for(const [action,label] of [['open','Открыть'],['folder','Папка'],['cancel','Отменить'],['remove','Удалить из списка']]){const b=document.createElement('button');b.className='chip';b.textContent=label;b.onclick=()=>send({cmd:'download_action',id:r.id,action});buttons[action]=b;actions.append(b)}
       body.append(name,path,bar,meta);el.append(icon,body,actions);entry={el,name,path,bar,meta,buttons,key:''};downloadNodes.set(r.id,entry);list.append(el);
     }
     const key=JSON.stringify(r);if(entry.key!==key){entry.key=key;entry.name.textContent=r.name;entry.path.textContent=r.path;
       const progress=r.total>0?Math.min(100,Math.round(r.received/r.total*100)):null;
       entry.bar.hidden=r.status!=='running';if(progress===null)entry.bar.removeAttribute('value');else entry.bar.value=progress;
       entry.meta.textContent=(names[r.status]||r.status)+' · '+downloadBytes(r.received)+(r.total?' / '+downloadBytes(r.total):'')+(progress!==null&&r.status==='running'?' · '+progress+'%':'')+(r.error?' · '+r.error:'');entry.meta.classList.toggle('dl-error',r.status==='failed');
-      entry.buttons.open.hidden=r.status!=='completed';entry.buttons.cancel.hidden=r.status!=='running';
+      entry.buttons.open.hidden=r.status!=='completed';entry.buttons.cancel.hidden=r.status!=='running';entry.buttons.remove.hidden=r.status==='running';
     }
   }
   // Keep existing nodes stable when progress changes; order only new/reordered entries.
@@ -788,21 +747,7 @@ window.onExt = (list) => {
 window.onExtMsg = (m) => { $('extmsg').textContent = m; };
 
 // ---------- распознавание музыки ----------
-let song = null;
-window.onMusic = (m) => {
-  const st = m.status, t = $('mtitle'), sub = $('msub');
-  $('p-music').dataset.st = st;
-  song = m.song || null;
-  if (st === 'listening') { t.textContent = 'Слушаю…'; sub.textContent = 'Включите музыку — запись идёт 10 секунд'; }
-  else if (st === 'searching') { t.textContent = 'Ищу трек…'; sub.textContent = ''; }
-  else if (st === 'found' && song) { t.textContent = song.title; sub.textContent = [song.artist, song.album, song.date].filter(Boolean).join(' · '); }
-  else if (st === 'notfound') { t.textContent = 'Трек не найден'; sub.textContent = 'Сделайте звук погромче или запишите другой фрагмент'; }
-  else if (st === 'error') { t.textContent = 'Не получилось'; sub.textContent = m.msg || ''; }
-  else { t.textContent = 'Нажмите, чтобы распознать трек'; sub.textContent = ''; }
-  $('mopen').hidden = !(st === 'found' && song && song.link);
-  $('mgo').disabled = st === 'listening' || st === 'searching';
-  $('mgo').textContent = st === 'found' || st === 'notfound' || st === 'error' ? 'Ещё раз' : 'Слушать';
-};
+
 
 // ---------- обработчики ----------
 buildStatic();
@@ -817,12 +762,6 @@ const togglePanel = (name) => send(state.panel === name ? { cmd: 'close_panel' }
 $('hist').onclick = () => togglePanel('history');
 $('downloadsbtn').onclick = () => togglePanel('downloads');
 $('extbtn').onclick = () => togglePanel('ext');
-$('mgo').onclick = () => send({ cmd: 'recognize' });
-$('mopen').onclick = () => { if (song && song.link) send({ cmd: 'open_url', url: song.link }); };
-$('audlink').onclick = () => send({ cmd: 'open_url', url: 'https://dashboard.audd.io/' });
-$('toksave').onclick = () => send({ cmd: 'set_music', token: $('tok').value, source: (state.music_cfg || {}).source || 'system' });
-document.querySelectorAll('.segx[data-x="source"] button').forEach((b) => b.onclick = () =>
-  send({ cmd: 'set_music', token: (state.music_cfg || {}).token || '', source: b.dataset.v }));
 document.querySelectorAll('.segx[data-x="level"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_adblock_level', level: b.dataset.v }));
 $('updf').onclick = () => send({ cmd: 'update_filters' });
 $('star').onclick = () => send({ cmd: 'add_current_link' });
@@ -835,13 +774,20 @@ $('tabs').addEventListener('dblclick', (e) => { if (dragZone(e.target)) send({ c
 document.querySelectorAll('.segx[data-x="sleep"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_sleep', minutes: +b.dataset.v }));
 document.querySelectorAll('.segx[data-x="eco"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_eco', on: b.dataset.v === 'on' }));
 document.querySelectorAll('.segx[data-x="startup"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_startup', mode: b.dataset.v }));
-$('customaccent').onchange = e => setLook({accent:e.target.value});
+const accentHex = $('accenthex');
+const commitAccent = () => {
+  const hex = accentHex.value.trim();
+  const valid = /^#[0-9a-f]{6}$/i.test(hex);
+  accentHex.setCustomValidity(valid ? '' : 'Введите цвет в формате #4F46E5');
+  if (accentHex.reportValidity()) setLook({accent:hex.toLowerCase()});
+};
+accentHex.oninput = () => accentHex.setCustomValidity('');
+accentHex.onchange = commitAccent;
+accentHex.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); commitAccent(); } };
+$('customaccent').onchange = e => { accentHex.value = e.target.value; accentHex.setCustomValidity(''); commitAccent(); };
+$('accentreset').onclick = () => { accentHex.setCustomValidity(''); setLook({accent:'indigo'}); };
 $('defaultbrowser').onclick = () => {
   if(state.platform!=='linux'||confirm('Сделать Lumen браузером по умолчанию для HTTP и HTTPS в этой учётной записи?'))send({cmd:'default_browser'});
-};
-$('devmode').onclick = () => {
-  const on = !state.developer_mode;
-  if(confirm((on ? 'Включить режим разработчика? Другие программы на компьютере смогут обращаться к данным страниц. ' : 'Выключить режим разработчика? ') + 'Закройте другие окна Lumen и расширений. Браузер перезапустится; вкладки восстановятся, несохранённые формы могут быть потеряны.')) send({cmd:'restart_developer',on});
 };
 document.querySelectorAll('.segx[data-x="labels"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_labels', on: b.dataset.v === 'on' }));
 $('extgo').onclick = () => { const v = $('extin').value.trim(); if (v) send({ cmd: 'ext_install', input: v }); };

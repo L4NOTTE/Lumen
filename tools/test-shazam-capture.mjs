@@ -27,3 +27,16 @@ const node=new context.AudioContext().createMediaStreamSource(stream);node.conne
 stream.getAudioTracks()[0].stop();assert.equal(commands.at(-1).cmd,'capture_stop');assert.equal(closed,1);
 context.__lumenAudio(48000,Buffer.from(pcm.buffer).toString('base64'));assert.equal(starts.length,1,'ignore packets after stop');
 console.log('Native audio bridge: click gate, PCM scheduling, feedback suppression and cleanup OK');
+
+const consent=readFileSync(new URL('../ui/audio-consent.html',import.meta.url),'utf8');
+const actions={approve:{},deny:{}}, decisions=[];
+vm.runInNewContext(consent.match(/<script>([\s\S]*?)<\/script>/)[1],{
+  document:{getElementById:id=>actions[id]},window:{ipc:{postMessage:value=>decisions.push(value)}}
+});
+actions.approve.onclick({isTrusted:false});
+actions.deny.onclick({isTrusted:false});
+assert.deepEqual(decisions,[],'synthetic clicks cannot approve or cancel capture');
+actions.approve.onclick({isTrusted:true});
+actions.deny.onclick({isTrusted:true});
+assert.deepEqual(decisions,['approve-audio','deny-audio']);
+console.log('Audio consent strip: only trusted button events send decisions');

@@ -1,7 +1,7 @@
 param([Parameter(Mandatory)][string]$Executable,[Parameter(Mandatory)][string]$DataDirectory)
 $ErrorActionPreference='Stop'
 New-Item -ItemType Directory -Path $DataDirectory | Out-Null
-[IO.File]::WriteAllText((Join-Path $DataDirectory 'settings.json'),'{"startup":"new","adblock":false,"audd_token":"test-obsolete-token"}')
+[IO.File]::WriteAllText((Join-Path $DataDirectory 'settings.json'),'{"startup":"new","adblock":false,"obsolete_test_field":"test-obsolete-token"}')
 $env:LUMEN_DATA_DIR=$DataDirectory
 $env:LUMEN_TEST_HIDDEN='1'
 $env:LUMEN_ENABLE_CDP='1'
@@ -28,7 +28,7 @@ try{
  if(@($web|Where-Object {$_.CommandLine -match '--remote-debugging-(port|pipe)'}).Count){throw 'Debug endpoint enabled by default'}
  if(Test-Path -LiteralPath (Join-Path $DataDirectory 'profile/lumen-debug-port')){throw 'Debug endpoint marker created'}
  $settings=Get-Content -LiteralPath (Join-Path $DataDirectory 'settings.json') -Raw
- if($settings -match 'audd_token|test-obsolete-token'){throw 'Obsolete token retained'}
+ if($settings -match 'obsolete_test_field|test-obsolete-token'){throw 'Obsolete token retained'}
  Write-Output 'Geolocation and forged new-tab command blocked, legacy CDP flags ignored: OK'
 }finally{
  if($app -and -not $app.HasExited){Stop-Process -Id $app.Id}

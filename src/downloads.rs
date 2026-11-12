@@ -104,7 +104,9 @@ impl Manager {
                 .unwrap_or_default()
         };
         records.truncate(200);
+        let mut urls_changed = false;
         for r in &mut records {
+            if r.url != "data:…" { urls_changed |= crate::security::redact_persisted_url(&mut r.url); }
             if r.status == "running" {
                 r.status = "interrupted".into();
                 r.error = Some("Загрузка была прервана при закрытии браузера".into());
@@ -125,7 +127,7 @@ impl Manager {
                 }
             }
         });
-        Rc::new(RefCell::new(Self {
+        let manager = Self {
             records,
             tasks: HashMap::new(),
             history,
@@ -138,7 +140,9 @@ impl Manager {
             alive,
             #[cfg(target_os = "linux")]
             contexts: Vec::new(),
-        }))
+        };
+        if urls_changed { manager.update_history(|_| {}); }
+        Rc::new(RefCell::new(manager))
     }
     pub fn records(&self) -> &[Record] {
         &self.records
@@ -184,7 +188,7 @@ impl Manager {
         let url = if url.starts_with("data:") {
             String::from("data:…")
         } else {
-            url.chars().take(4096).collect()
+            crate::security::persisted_url(&url).chars().take(4096).collect()
         };
         self.records.insert(
             0,
@@ -208,13 +212,27 @@ impl Manager {
         self.dirty = true;
         self.notice = Some(format!("Загрузка: {}", self.records[0].name));
         self.active.store(true, Ordering::Relaxed);
-        self.save();
+        self.save_changes(&[id.as_str()]);
         id
     }
-    fn save(&self) {
+    fn save_changes(&self, ids: &[&str]) {
+        self.update_history(|rows| {
+            for id in ids {
+                if let Some(row) = self.records.iter().find(|row| row.id == *id) {
+                    rows.insert(row.id.clone(), row.clone());
+                } else {
+                    rows.remove(*id);
+                }
+            }
+        });
+    }
+    fn update_history(&self, update: impl FnOnce(&mut HashMap<String, Record>)) {
         if self.private {
             return;
         }
+        let Ok(lock) = fs::OpenOptions::new().read(true).write(true).create(true)
+            .truncate(false).open(self.history.with_extension("lock")) else { return; };
+        if lock.lock().is_err() { return; }
         let mut all: HashMap<String, Record> = crate::security::read_profile(&self.history,4*1024*1024)
             .ok()
             .and_then(|b| serde_json::from_slice::<Vec<Record>>(&b).ok())
@@ -222,8 +240,9 @@ impl Manager {
             .into_iter()
             .map(|r| (r.id.clone(), r))
             .collect();
-        for r in &self.records {
-            all.insert(r.id.clone(), r.clone());
+        update(&mut all);
+        for row in all.values_mut() {
+            if row.url != "data:…" { crate::security::redact_persisted_url(&mut row.url); }
         }
         let mut rows: Vec<_> = all.into_values().collect();
         rows.sort_by(|a, b| b.created.cmp(&a.created));
@@ -234,7 +253,7 @@ impl Manager {
     }
     pub fn poll(&mut self) -> bool {
         let mut changed = std::mem::take(&mut self.dirty);
-        let mut ended = false;
+        let mut ended = Vec::new();
         for r in &mut self.records {
             if let Some(task) = self.tasks.get(&r.id) {
                 let p = task.progress();
@@ -260,13 +279,13 @@ impl Manager {
                         r.name
                     ));
                     self.tasks.remove(&r.id);
-                    ended = true;
+                    ended.push(r.id.clone());
                 }
             }
         }
         self.active.store(!self.tasks.is_empty(), Ordering::Relaxed);
-        if ended {
-            self.save()
+        if !ended.is_empty() {
+            self.save_changes(&ended.iter().map(String::as_str).collect::<Vec<_>>());
         }
         changed
     }
@@ -279,8 +298,14 @@ impl Manager {
                     r.error = None;
                 }
                 self.active.store(!self.tasks.is_empty(), Ordering::Relaxed);
-                self.save();
+                self.save_changes(&[id]);
             }
+            return;
+        }
+        if action == "remove" {
+            if self.tasks.contains_key(id) { return; }
+            self.records.retain(|row| row.id != id);
+            self.save_changes(&[id]);
             return;
         }
         let Some(row) = self.records.iter().find(|r| r.id == id) else {
@@ -294,12 +319,10 @@ impl Manager {
         }
     }
     pub fn clear(&mut self) {
-        self.records.retain(|r| r.status == "running");
-        if !self.private {
-            if let Ok(data)=serde_json::to_vec(&self.records) {
-                let _=crate::security::atomic_write(&self.history,&data);
-            }
-        }
+        let removed: Vec<_> = self.records.iter().filter(|row| row.status != "running")
+            .map(|row| row.id.clone()).collect();
+        self.records.retain(|row| row.status == "running");
+        self.save_changes(&removed.iter().map(String::as_str).collect::<Vec<_>>());
     }
     pub fn open_folder(&self) {
         let _ = fs::create_dir_all(&self.folder);
@@ -569,8 +592,25 @@ mod tests {
         assert!(!filename("a:b?.txt").contains(':'));
     }
     #[test]
-    fn progress_and_cancel_do_not_delete_files() {
-        struct Fake;
+    fn deleted_record_is_not_restored_by_another_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = Manager::new(dir.path(), false, || true);
+        let path = dir.path().join("first.txt");
+        fs::write(&path, b"keep").unwrap();
+        let id = first.borrow_mut().add("https://example.com/file".into(), path.clone(), Box::new(Fake));
+        first.borrow_mut().action(&id, "cancel");
+        let second = Manager::new(dir.path(), false, || true);
+        assert_eq!(second.borrow().records()[0].id, id);
+        first.borrow_mut().action(&id, "remove");
+        let other_id = first.borrow_mut().add("https://example.com/other".into(), dir.path().join("other.txt"), Box::new(Fake));
+        assert_ne!(id, other_id);
+        second.borrow().save_changes(&[]);
+        let reloaded = Manager::new(dir.path(), false, || true);
+        assert_eq!(reloaded.borrow().records().len(), 1);
+        assert_eq!(reloaded.borrow().records()[0].id, other_id);
+        assert_eq!(fs::read(&path).unwrap(), b"keep");
+    }
+    struct Fake;
         impl Task for Fake {
             fn progress(&self) -> Progress {
                 Progress {
@@ -582,6 +622,8 @@ mod tests {
             }
             fn cancel(&self) {}
         }
+    #[test]
+    fn progress_and_cancel_do_not_delete_files() {
         let dir = std::env::temp_dir().join(format!(
             "lumen-download-test-{}-{}",
             std::process::id(),
@@ -601,7 +643,8 @@ mod tests {
         let id = m.borrow().records()[0].id.clone();
         m.borrow_mut().action(&id, "cancel");
         assert_eq!(m.borrow().records()[0].status, "cancelled");
-        m.borrow_mut().clear();
+        m.borrow_mut().action(&id, "remove");
+        assert!(m.borrow().records().is_empty());
         assert!(path.exists());
         assert!(!dir.join("downloads.json").exists());
         let _ = fs::remove_file(path);

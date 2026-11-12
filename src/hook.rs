@@ -51,6 +51,35 @@ pub fn lock_down(wv: &WebView) -> windows_core::Result<()> {
     Ok(())
 }
 
+pub fn source(wv: &WebView) -> Option<String> {
+    let core = unsafe { wv.controller().CoreWebView2() }.ok()?;
+    read_source(&core).ok()
+}
+
+fn read_source(core: &ICoreWebView2) -> windows_core::Result<String> {
+    let mut url = PWSTR::null();
+    unsafe { core.Source(&mut url)?; }
+    Ok(take_pwstr(url))
+}
+
+pub fn install_source_changed(
+    wv: &WebView,
+    changed: impl Fn(String) + 'static,
+) -> windows_core::Result<()> {
+    let handler = webview2_com::SourceChangedEventHandler::create(Box::new(move |sender, _| {
+        if let Some(core) = sender {
+            changed(read_source(&core)?);
+        }
+        Ok(())
+    }));
+    let mut token = Default::default();
+    unsafe { wv.controller().CoreWebView2()?.add_SourceChanged(&handler, &mut token) }
+}
+
+pub fn open_devtools(wv: &WebView) -> windows_core::Result<()> {
+    unsafe { wv.controller().CoreWebView2()?.OpenDevToolsWindow() }
+}
+
 /// Distinguish a committed document from a download-only popup. Never guess
 /// from a filename: redirects and Content-Disposition decide the outcome.
 pub fn install_popup_outcome(wv:&WebView, committed:impl Fn()+'static, download:impl Fn()+'static)->windows_core::Result<()> {

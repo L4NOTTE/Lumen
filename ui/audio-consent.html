@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; padding: 10px 14px; background: #202336; color: #f2f3fa; font: 13px "Segoe UI", sans-serif; }
+p { margin: 0 0 7px; line-height: 1.4; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+button { padding: 5px 10px; border: 1px solid #53596f; border-radius: 7px; color: inherit; background: #2b3048; font: inherit; cursor: pointer; }
+button:first-child { background: #424a85; }
+</style>
+</head>
+<body>
+<p>Shazam получит системный звук, включая другие приложения, на срок до 20 секунд.</p>
+<div class="actions">
+<button id="approve" type="button">Разрешить звук</button>
+<button id="deny" type="button">Отмена</button>
+</div>
+<script>
+for (const [id, command] of [['approve', 'approve-audio'], ['deny', 'deny-audio']]) {
+  document.getElementById(id).onclick = event => {
+    if (event.isTrusted) window.ipc.postMessage(command);
+  };
+}
+</script>
+</body>
+</html>
