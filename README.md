@@ -3,7 +3,7 @@
   <h1>Lumen</h1>
   <p><strong>Браузер для Windows и Linux, написанный на Rust</strong></p>
   <p>Лаконичный интерфейс · Настраиваемый внешний вид · Инструменты разработчика сбоку</p>
-  <p><code>Rust</code> &nbsp; <code>Windows x64</code> &nbsp; <code>WebView2</code> &nbsp; <code>v0.4.31</code> &nbsp; <code>Linux preview</code></p>
+  <p><code>Rust</code> &nbsp; <code>Windows x64</code> &nbsp; <code>WebView2</code> &nbsp; <code>v0.4.34</code> &nbsp; <code>Linux preview</code></p>
 </div>
 
 ---
@@ -100,6 +100,12 @@ iscc installer/lumen.iss
 Загрузите **содержимое архива исходников** в корень репозитория, включая скрытую папку `.github`. Рядом с README должны находиться `Cargo.toml`, `Cargo.lock`, `src`, `ui` и остальные файлы проекта.
 
 Workflow [build-windows](.github/workflows/build.yml) запускается при отправке изменений в `main` или вручную через **Actions → build-windows → Run workflow**. Он выполняет тесты, собирает браузер и установщик. После успешного завершения скачайте артефакт **lumen-windows** со страницы запуска.
+
+## Что нового в 0.4.34
+
+- При открытии ссылки в новой вкладке Lumen переключается на неё сразу после создания. Страница отображается по мере загрузки.
+- Для ссылок на сайты браузер пропускает подготовку стартовой страницы.
+- В тесте на Windows новая вкладка стала активной до ответа сервера, который был задержан на 7 секунд.
 
 ## Что нового в 0.4.31
 
