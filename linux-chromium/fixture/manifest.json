@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Lumen compatibility probe",
+  "version": "1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4NkfCyUQNPm/It1c22vdsVx+z/UQ0oo35mxyirGxSxn5uWodJXF+HrfJFPdp1woZfQmmukITjrMdrk05KxNjtytj9ECffTJACxH7S9Tf1KlE9qttWpxDur+JsXVqAI6d2fDRVGYtmvisjcmgmmiZ40yA9wsVwFxq2NdpjjO/ZfiwjyhOGUEGq4MCZajeg2jQC7cjjAl8AI7SNRQ13mwp1q4EQZYvlCBf1+lkKVAzP3aHKwlHL2EPi9RX6GoUPAJtqD6wL/qDp2R6LrezQpRGZJO5HDJauoNU5BtvqjWQelHbtcMTnhmuvnYK3enjicKTHnc/yKwZHQM9j3SlCr9UbQIDAQAB",
+  "permissions": [
+    "storage",
+    "tabs",
+    "tabCapture",
+    "activeTab",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}

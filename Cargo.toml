@@ -1,6 +1,6 @@
 [package]
 name = "lumen"
-version = "0.4.23"
+version = "0.4.25"
 edition = "2021"
 description = "Lumen — браузер для Windows и Linux на Rust"
 

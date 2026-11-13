@@ -338,11 +338,24 @@ pub fn install_blocker(
     Ok(())
 }
 
+pub fn is_playing_audio(wv: &WebView) -> windows_core::Result<bool> {
+    unsafe {
+        let core = wv.controller().CoreWebView2()?.cast::<ICoreWebView2_8>()?;
+        let mut playing = Default::default();
+        core.IsDocumentPlayingAudio(&mut playing)?;
+        Ok(playing.as_bool())
+    }
+}
+
 /// Приостанавливает скрытую вкладку (освобождает процессор и часть памяти).
 pub fn suspend(wv: &WebView) {
     unsafe {
         if let Ok(core) = wv.controller().CoreWebView2() {
             if let Ok(w3) = core.cast::<ICoreWebView2_3>() {
+                let mut suspended = Default::default();
+                if w3.IsSuspended(&mut suspended).is_err() || suspended.as_bool() {
+                    return;
+                }
                 let h = TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(())));
                 let _ = w3.TrySuspend(&h);
             }

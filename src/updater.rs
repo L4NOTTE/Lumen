@@ -11,7 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const RELEASES: &str = "https://github.com/L4NOTTE/Lumen/releases";
+const RELEASES: &str = "https://github.com/L4NOTTE/LUMEN-IS-Web-browser/releases";
 const KEY: &[u8; 32] = include_bytes!("../assets/update-public.bin");
 const LIMIT: u64 = 64 * 1024 * 1024;
 #[derive(Deserialize)]

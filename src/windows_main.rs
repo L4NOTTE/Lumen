@@ -62,6 +62,8 @@ fn browser_args(eco: bool) -> String {
 const TICK_EVERY: Duration = Duration::from_secs(60);
 /// Через сколько скрытая вкладка приостанавливается (освобождает процессор и память).
 const SUSPEND_AFTER: Duration = Duration::from_secs(60);
+const BACKGROUND_VIEW_BUDGET: usize = 8;
+const EARLY_EVICTIONS_PER_TICK: usize = 2;
 
 /// Применяет CSS через конструируемую таблицу стилей — работает даже на сайтах со строгим CSP.
 fn inject_css_js(key: &str, css: &str) -> String {
@@ -440,7 +442,6 @@ struct Tab {
     loading: bool,
     document_epoch: u64,
     last_active: Instant,
-    suspended: bool,
     /// true — для вкладки включён режим низкого потребления памяти
     low: bool,
 }
@@ -943,7 +944,6 @@ impl App {
             loading: false,
             document_epoch: 0,
             last_active: Instant::now(),
-            suspended: false,
             low: false,
         });
         if foreground || self.active==0 { self.activate(id); }
@@ -954,6 +954,11 @@ impl App {
     fn activate(&mut self, id: u32) {
         if !self.tabs.iter().any(|t| t.id == id) || !self.reattach(id) { return; }
         if id != self.active && self.fullscreen { self.set_fullscreen(false); }
+        if id != self.active {
+            if let Some(previous) = self.tabs.iter_mut().find(|tab| tab.id == self.active) {
+                previous.last_active = Instant::now();
+            }
+        }
         self.active = id;
         self.panel.clear();
         let sleeping = self.tabs.iter().find(|t| t.id == id).map(|t| t.webview.is_none());
@@ -964,6 +969,7 @@ impl App {
                 t.webview = Some(wv);
                 t.favicon=icon;
                 t.visible = None; t.bounds = None;
+                t.low = false;
             }
         }
         if let Some(t) = self.tabs.iter_mut().find(|t| t.id == id) {
@@ -998,12 +1004,14 @@ impl App {
             let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) else { return; };
             tab.webview = Some(view);
             tab.favicon = icon;
-            tab.suspended = false;
             tab.bounds = None;
             tab.visible = None;
         }
         let detached = match self.detached_spare.take() {
             Some((_, spare)) => {
+                spare.window.set_fullscreen(None);
+                spare.window.set_maximized(false);
+                let _ = spare.strip.set_memory_usage_level(MemoryUsageLevel::Normal);
                 let _ = spare.strip.evaluate_script("window.resetTabDrag()");
                 fit_extension_popup(&spare.window, Some((x.saturating_sub(240), y.saturating_sub(20))));
                 spare
@@ -1022,7 +1030,6 @@ impl App {
             return;
         }
         hook::resume(view);
-        tab.suspended = false;
         tab.low = false;
         let _ = view.set_memory_usage_level(MemoryUsageLevel::Normal);
         detached.layout(view);
@@ -1033,7 +1040,11 @@ impl App {
         detached.window.set_visible(true);
         self.detached.insert(id, detached);
         if self.active == id {
-            if let Some(next) = self.tabs.iter().rev().find(|tab| !self.detached.contains_key(&tab.id)).map(|tab| tab.id) {
+            if let Some(next) = self.tabs.iter()
+                .filter(|tab| !self.detached.contains_key(&tab.id))
+                .max_by_key(|tab| (tab.webview.is_some(), tab.last_active))
+                .map(|tab| tab.id)
+            {
                 self.activate(next);
             }
         }
@@ -1115,11 +1126,54 @@ impl App {
         if let Some(shell) = self.detached.remove(&id) {
             shell.binding.set(None);
             shell.window.set_visible(false);
-            shell.window.set_fullscreen(None);
-            shell.window.set_maximized(false);
-            self.detached_spare = Some((Instant::now() + Duration::from_secs(8), shell));
+            if self.tabs.iter().filter(|tab| tab.webview.is_some()).count() <= BACKGROUND_VIEW_BUDGET + 1 {
+                let _ = shell.strip.set_memory_usage_level(MemoryUsageLevel::Low);
+                self.detached_spare = Some((Instant::now() + Duration::from_secs(8), shell));
+            }
         }
         true
+    }
+
+    fn manage_background_views(&mut self) {
+        let sleep_minutes = self.settings.sleep_minutes;
+        let sleep_after = Duration::from_secs(u64::from(sleep_minutes) * 60);
+        let downloads_active = self.downloads.borrow().active_count() > 0;
+        let mut candidates = Vec::new();
+        let mut background_views = 0;
+        for (index, tab) in self.tabs.iter().enumerate() {
+            let Some(view) = tab.webview.as_ref() else { continue; };
+            if tab.id == self.active || self.detached.contains_key(&tab.id) { continue; }
+            background_views += 1;
+            let idle = tab.last_active.elapsed();
+            if idle >= SUSPEND_AFTER && !tab.loading && !keeps_awake(&tab.url)
+                && hook::is_playing_audio(view) == Ok(false)
+            {
+                candidates.push((index, idle));
+            }
+        }
+        candidates.sort_unstable_by_key(|&(_, idle)| std::cmp::Reverse(idle));
+
+        let mut early_evictions = 0;
+        let mut changed = false;
+        for (index, idle) in candidates {
+            let tab = &mut self.tabs[index];
+            let early = idle < sleep_after;
+            let over_budget = background_views > BACKGROUND_VIEW_BUDGET
+                && early_evictions < EARLY_EVICTIONS_PER_TICK;
+            let http_page = tab.url.starts_with("https://") || tab.url.starts_with("http://");
+            if sleep_minutes > 0 && !downloads_active && http_page && (!early || over_budget) {
+                tab.webview = None;
+                self.cosmetic_deadlines.remove(&tab.id);
+                background_views -= 1;
+                early_evictions += usize::from(early);
+                changed = true;
+            } else if !downloads_active && (http_page || tab.url.is_empty()) {
+                if let Some(view) = tab.webview.as_ref() {
+                    hook::suspend(view);
+                }
+            }
+        }
+        if changed { self.push_state(); }
     }
 
     fn layout(&mut self) {
@@ -1140,9 +1194,8 @@ impl App {
             if let Some(wv) = &t.webview {
                 let visible = t.id == self.active && !open;
                 if visible {
-                    if t.suspended {
+                    if t.visible != Some(true) {
                         hook::resume(wv);
-                        t.suspended = false;
                     }
                     if !t.bounds.as_ref().is_some_and(|r| r.position == page_rect.position && r.size == page_rect.size) {
                         if wv.set_bounds(page_rect).is_ok() { t.bounds = Some(page_rect); }
@@ -1152,8 +1205,9 @@ impl App {
                 // скрытые вкладки переводим в режим низкого потребления памяти
                 if visible == t.low {
                     let level = if visible { MemoryUsageLevel::Normal } else { MemoryUsageLevel::Low };
-                    let _ = wv.set_memory_usage_level(level);
-                    t.low = !visible;
+                    if wv.set_memory_usage_level(level).is_ok() {
+                        t.low = !visible;
+                    }
                 }
             }
         }
@@ -1380,10 +1434,13 @@ impl App {
 
     /// Восстанавливает вкладки прошлого сеанса: загружается только активная, остальные «спят».
     fn restore_session(&mut self, s: Session) {
-        for t in s.tabs.iter().filter(|t|safe_url(&t.u)) {
+        let mut active = None;
+        for (index, t) in s.tabs.iter().enumerate() {
+            if !safe_url(&t.u) { continue; }
             if t.u.starts_with("chrome-extension://mmioliijnhnoblpgimnlajmefafdfilb/") { continue; }
             let id = self.next_id;
             self.next_id += 1;
+            if index <= s.active || active.is_none() { active = Some(id); }
             self.tabs.push(Tab {
                 favicon:favicon::State::new(None),
             visible: None, bounds: None,
@@ -1394,14 +1451,11 @@ impl App {
                 loading: false,
                 document_epoch: 0,
                 last_active: Instant::now(),
-                suspended: false,
                 low: false,
             });
         }
-        if self.tabs.is_empty() { self.new_tab(None); return; }
-        let idx = s.active.min(self.tabs.len().saturating_sub(1));
-        let id = self.tabs[idx].id;
-        self.activate(id);
+        if let Some(id) = active { self.activate(id); }
+        else { self.new_tab(None); }
     }
 
     fn toast(&self, msg: &str) {
@@ -2083,41 +2137,7 @@ impl App {
                 }
             },
             UserEvent::Tick => {
-                let active = self.active;
-                let mut changed = false;
-                let sleep_after = Duration::from_secs(self.settings.sleep_minutes as u64 * 60);
-                for t in self.tabs.iter_mut() {
-                    if self.detached.contains_key(&t.id) { continue; }
-                    if self.settings.sleep_minutes > 0
-                        && t.id != active
-                        && t.webview.is_some()
-                        && !t.url.is_empty()
-                        && t.last_active.elapsed() > sleep_after
-                        && !keeps_awake(&t.url)
-                    {
-                        t.webview = None; // освобождаем память процессов вкладки
-                        t.loading = false;
-                        changed = true;
-                    }
-                }
-                // скрытые вкладки приостанавливаем (кроме сайтов с музыкой и видео)
-                for t in self.tabs.iter_mut() {
-                    if self.detached.contains_key(&t.id) { continue; }
-                    if t.id != active
-                        && !t.suspended
-                        && !t.loading
-                        && t.last_active.elapsed() > SUSPEND_AFTER
-                        && !keeps_awake(&t.url)
-                    {
-                        if let Some(wv) = &t.webview {
-                            hook::suspend(wv);
-                            t.suspended = true;
-                        }
-                    }
-                }
-                if changed {
-                    self.push_state();
-                }
+                self.manage_background_views();
             }
             UserEvent::FiltersBuilt(f) => {
                 if self.settings.adblock_level == "strong" {
@@ -3246,7 +3266,12 @@ fn main() {
         app.new_tab(None);
     }
     app.spawn_filters(false);
-    if std::env::var_os("LUMEN_TEST_HIDDEN").is_none() { animate_window(&app.window, true); }
+    if std::env::var_os("LUMEN_TEST_HIDDEN").is_none() {
+        // AnimateWindow can show an empty frame while the child WebViews are starting.
+        app.window.set_visible(true);
+        app.ui_visible = None;
+        app.layout();
+    }
 
     let update_proxy = app.proxy.clone();
     let updates = crate::updater::start_with_status(!incognito && !secondary, move |status| {
