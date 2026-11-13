@@ -46,7 +46,7 @@ fn version(value: &str) -> Option<[u32; 3]> {
     }
     Some(parsed)
 }
-fn authenticate(bytes: &[u8], key: &[u8], current: &str, now: u64) -> Option<Manifest> {
+fn verify_manifest(bytes: &[u8], key: &[u8], now: u64) -> Option<Manifest> {
     if bytes.len() > 16384 {
         return None;
     }
@@ -57,13 +57,18 @@ fn authenticate(bytes: &[u8], key: &[u8], current: &str, now: u64) -> Option<Man
         .verify(&payload, &signature)
         .ok()?;
     let manifest: Manifest = serde_json::from_slice(&payload).ok()?;
-    if version(&manifest.version)? <= version(current)?
-        || manifest.expires <= now
+    version(&manifest.version)?;
+    if manifest.expires <= now
         || manifest.expires > now.saturating_add(31 * 86400)
     {
         return None;
     }
     Some(manifest)
+}
+#[cfg(any(windows, test))]
+fn authenticate(bytes: &[u8], key: &[u8], current: &str, now: u64) -> Option<Manifest> {
+    let manifest = verify_manifest(bytes, key, now)?;
+    (version(&manifest.version)? > version(current)?).then_some(manifest)
 }
 fn verify_asset(path: &Path, asset: &Asset) -> io::Result<()> {
     let file = fs::File::open(path)?;
@@ -163,45 +168,60 @@ pub fn start_with_status(enabled: bool, notify: impl Fn(&'static str) + Send + '
     let (request, commands) = mpsc::sync_channel(1);
     service.request = Some(request);
     std::thread::spawn(move || loop {
-        if let Some(update) = check(target.clone()) {
-            let _ = send.send(update);
-            notify("Обновление загружено. Закройте браузер для установки.");
-            break;
+        match check(target.clone()) {
+            Ok(Some(update)) => {
+                let _ = send.send(update);
+                notify("Обновление загружено. Закройте браузер для установки.");
+                break;
+            }
+            Ok(None) => notify("Установлена новейшая версия."),
+            Err(message) => notify(message),
         }
-        notify("Подходящее обновление не получено. Проверьте доступ к GitHub Releases.");
         if matches!(commands.recv_timeout(std::time::Duration::from_secs(6 * 60 * 60)), Err(mpsc::RecvTimeoutError::Disconnected)) { break; }
     });
     service
 }
-fn check(target: PathBuf) -> Option<Pending> {
-    let previous_modified = fs::metadata(&target).ok()?.modified().ok()?;
+fn check(target: PathBuf) -> Result<Option<Pending>, &'static str> {
+    const LOCAL_ERROR: &str = "Не удалось подготовить файлы обновления.";
+    const MANIFEST_ERROR: &str = "Не удалось подтвердить подлинность или срок действия манифеста.";
+    let previous_modified = fs::metadata(&target)
+        .and_then(|metadata| metadata.modified())
+        .map_err(|_| LOCAL_ERROR)?;
     let stage = tempfile::Builder::new()
         .prefix("lumen-update-")
         .tempdir()
-        .ok()?;
+        .map_err(|_| LOCAL_ERROR)?;
     let feed = stage.path().join("manifest.json");
     if !fetch(
         &format!("{RELEASES}/latest/download/lumen-update.json"),
         &feed,
         16384,
     ) {
-        return None;
+        return Err("Не удалось получить манифест обновления с GitHub Releases.");
     }
     let mut bytes = Vec::new();
     fs::File::open(&feed)
-        .ok()?
+        .map_err(|_| LOCAL_ERROR)?
         .take(16385)
         .read_to_end(&mut bytes)
-        .ok()?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    let manifest = authenticate(&bytes, KEY, env!("CARGO_PKG_VERSION"), now)?;
+        .map_err(|_| LOCAL_ERROR)?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| LOCAL_ERROR)?.as_secs();
+    let manifest = verify_manifest(&bytes, KEY, now).ok_or(MANIFEST_ERROR)?;
+    let published = version(&manifest.version).ok_or(MANIFEST_ERROR)?;
+    let current = version(env!("CARGO_PKG_VERSION")).ok_or(LOCAL_ERROR)?;
+    if published < current {
+        return Err("Установленная версия новее опубликованной в канале обновлений.");
+    }
+    if published == current {
+        return Ok(None);
+    }
     let asset = if cfg!(windows) {
-        manifest.windows_x64?
+        manifest.windows_x64
     } else {
-        manifest.linux_x64?
-    };
+        manifest.linux_x64
+    }.ok_or("В релизе нет обновления для этой платформы.")?;
     if asset.size == 0 || asset.size > LIMIT {
-        return None;
+        return Err("В манифесте указан недопустимый размер файла обновления.");
     }
     let file = stage.path().join(NAME);
     if !fetch(
@@ -209,16 +229,16 @@ fn check(target: PathBuf) -> Option<Pending> {
         &file,
         asset.size,
     ) {
-        return None;
+        return Err("Не удалось скачать файл обновления из релиза GitHub.");
     }
-    verify_asset(&file, &asset).ok()?;
-    Some(Pending {
+    verify_asset(&file, &asset).map_err(|_| "Файл обновления не прошёл проверку целостности.")?;
+    Ok(Some(Pending {
         stage,
         target,
         asset,
         expires: manifest.expires,
         previous_modified,
-    })
+    }))
 }
 impl Pending {
     pub fn apply(self) -> io::Result<()> {
@@ -403,6 +423,7 @@ mod tests {
         let mut envelope = serde_json::json!({"payload":STANDARD.encode(data),"signature":STANDARD.encode(pair.sign(data).as_ref())});
         let key = pair.public_key().as_ref();
         assert!(authenticate(envelope.to_string().as_bytes(), key, "0.4.8", 900).is_some());
+        assert!(verify_manifest(envelope.to_string().as_bytes(), key, 900).is_some());
         assert!(authenticate(envelope.to_string().as_bytes(), key, "0.4.9", 900).is_none());
         assert!(authenticate(envelope.to_string().as_bytes(), key, "0.4.8", 1000).is_none());
         envelope["payload"] = STANDARD
