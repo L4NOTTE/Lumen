@@ -175,6 +175,7 @@
 
   // ---------- incremental cosmetic scans ----------
   const changed = records => {
+    if (!rules.length && !window.__lumenCfg.labels) return;
     if (!fullScan) for (const record of records) {
       let el = record.target.nodeType === 1 ? record.target : record.target.parentElement;
       if (!el) continue;
@@ -184,7 +185,7 @@
       dirty.add(el);
       if (dirty.size > 64) { fullScan = true; dirty.clear(); break; }
     }
-    schedule();
+    if (fullScan || dirty.size) schedule();
   };
   const run = () => {
     timer = 0; last = Date.now();

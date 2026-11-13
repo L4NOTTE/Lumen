@@ -80,6 +80,28 @@ pub fn open_devtools(wv: &WebView) -> windows_core::Result<()> {
     unsafe { wv.controller().CoreWebView2()?.OpenDevToolsWindow() }
 }
 
+/// The engine distinguishes a real user activation from script-created popups.
+pub fn install_popup_request(
+    wv: &WebView,
+    open: impl Fn(String) + 'static,
+) -> windows_core::Result<()> {
+    let handler = webview2_com::NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()); };
+        unsafe {
+            args.SetHandled(true)?;
+            let mut user_initiated = windows::Win32::Foundation::BOOL::default();
+            args.IsUserInitiated(&mut user_initiated)?;
+            if user_initiated.as_bool() {
+                let mut uri = PWSTR::null();
+                args.Uri(&mut uri)?;
+                open(take_pwstr(uri));
+            }
+        }
+        Ok(())
+    }));
+    unsafe { wv.controller().CoreWebView2()?.add_NewWindowRequested(&handler, &mut Default::default()) }
+}
+
 /// Distinguish a committed document from a download-only popup. Never guess
 /// from a filename: redirects and Content-Disposition decide the outcome.
 pub fn install_popup_outcome(wv:&WebView, committed:impl Fn()+'static, download:impl Fn()+'static)->windows_core::Result<()> {

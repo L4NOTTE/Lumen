@@ -374,6 +374,30 @@ mod tests {
     }
 }
 
+/// Keep the chosen hue readable against Lumen's light and dark chrome.
+pub fn accessible_accent(raw: &str, dark: bool) -> String {
+    let Ok(value) = u32::from_str_radix(raw.trim_start_matches('#'), 16) else { return raw.into(); };
+    let channels = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+    let luminance = |rgb: [u32; 3]| {
+        let [r, g, b] = rgb.map(|value| {
+            let value = f64::from(value) / 255.0;
+            if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+        });
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    };
+    let background = luminance(if dark { [37, 38, 43] } else { [243, 244, 246] });
+    let endpoint = if dark { 255 } else { 0 };
+    for weight in 0..=20 {
+        let candidate = channels.map(|value| (value * (20 - weight) + endpoint * weight) / 20);
+        let foreground = luminance(candidate);
+        if (foreground.max(background) + 0.05) / (foreground.min(background) + 0.05) >= 4.5 {
+            let [r, g, b] = candidate;
+            return format!("#{r:02x}{g:02x}{b:02x}");
+        }
+    }
+    raw.into()
+}
+
 pub fn hex_color(value: &str) -> bool {
     value.len() == 7
         && value.starts_with('#')

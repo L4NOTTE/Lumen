@@ -79,7 +79,7 @@ fn verify_asset(path: &Path, asset: &Asset) -> io::Result<()> {
 }
 fn fetch(url: &str, output: &Path, limit: u64) -> bool {
     #[cfg(windows)]
-    let mut command = crate::sys::hidden("curl.exe");
+    let Ok(mut command) = crate::sys::hidden("curl.exe") else { return false; };
     #[cfg(target_os = "linux")]
     let mut command = std::process::Command::new("/usr/bin/curl");
     command
@@ -121,14 +121,36 @@ const NAME: &str = if cfg!(windows) {
     "lumen-linux-x64"
 };
 
-pub fn start(enabled: bool) -> mpsc::Receiver<Pending> {
+pub struct UpdateService {
+    pending: mpsc::Receiver<Pending>,
+    request: Option<mpsc::SyncSender<()>>,
+}
+
+impl UpdateService {
+    pub fn try_recv(&self) -> Result<Pending, mpsc::TryRecvError> { self.pending.try_recv() }
+
+    #[cfg(windows)]
+    pub fn request(&self) -> &'static str {
+        match self.request.as_ref().map(|sender| sender.try_send(())) {
+            Some(Ok(()) | Err(mpsc::TrySendError::Full(()))) => "Проверяем обновления…",
+            Some(Err(mpsc::TrySendError::Disconnected(()))) => "Обновление уже загружено. Закройте браузер для установки.",
+            None => "Автообновление доступно в установленной версии, в основном обычном окне.",
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn start(enabled: bool) -> UpdateService { start_with_status(enabled, |_| {}) }
+
+pub fn start_with_status(enabled: bool, notify: impl Fn(&'static str) + Send + 'static) -> UpdateService {
     let (send, receive) = mpsc::channel();
+    let mut service = UpdateService { pending: receive, request: None };
     if !enabled || !cfg!(target_arch = "x86_64") || std::env::var_os("LUMEN_TEST_HIDDEN").is_some()
     {
-        return receive;
+        return service;
     }
     let Ok(target) = std::env::current_exe() else {
-        return receive;
+        return service;
     };
     #[cfg(windows)]
     let installed = target.file_name().is_some_and(|n| n == "lumen.exe")
@@ -136,14 +158,20 @@ pub fn start(enabled: bool) -> mpsc::Receiver<Pending> {
     #[cfg(target_os = "linux")]
     let installed = dirs::home_dir().is_some_and(|p| p.join(".local/bin/lumen") == target);
     if !installed {
-        return receive;
+        return service;
     }
-    std::thread::spawn(move || {
-        if let Some(update) = check(target) {
+    let (request, commands) = mpsc::sync_channel(1);
+    service.request = Some(request);
+    std::thread::spawn(move || loop {
+        if let Some(update) = check(target.clone()) {
             let _ = send.send(update);
+            notify("Обновление загружено. Закройте браузер для установки.");
+            break;
         }
+        notify("Подходящее обновление не получено. Проверьте доступ к GitHub Releases.");
+        if matches!(commands.recv_timeout(std::time::Duration::from_secs(6 * 60 * 60)), Err(mpsc::RecvTimeoutError::Disconnected)) { break; }
     });
-    receive
+    service
 }
 fn check(target: PathBuf) -> Option<Pending> {
     let previous_modified = fs::metadata(&target).ok()?.modified().ok()?;
@@ -250,7 +278,14 @@ pub fn helper_mode() -> bool {
         return false;
     }
     if args.len() == 5 {
-        let _ = run_helper(&args[2], Path::new(&args[3]), &args[4]);
+        let result = run_helper(&args[2], Path::new(&args[3]), &args[4]);
+        if let Some(dir) = dirs::data_local_dir().map(|dir| dir.join("Lumen")) {
+            let status = match result {
+                Ok(()) => "Update installer completed".to_string(),
+                Err(error) => format!("Update installer failed: {error}"),
+            };
+            let _ = crate::security::atomic_write(&dir.join("update-status.txt"), status.as_bytes());
+        }
     }
     true
 }
@@ -326,10 +361,17 @@ fn run_helper(pid: &std::ffi::OsStr, target: &Path, modified: &std::ffi::OsStr) 
             .parent()
             .ok_or_else(|| io::Error::other("missing installation folder"))?,
     );
-    std::process::Command::new(installer)
-        .args(["/SILENT", "/NORESTART", "/NOCLOSEAPPLICATIONS"])
+    let result = std::process::Command::new(&installer)
+        .args(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCLOSEAPPLICATIONS"])
         .arg(dir_arg)
-        .spawn()?;
+        .status();
+    drop(_installer_lock);
+    let _ = fs::remove_file(&installer);
+    let _ = fs::remove_file(stage.join("manifest.json"));
+    let result = result?;
+    if !result.success() {
+        return Err(io::Error::other(format!("installer returned {result}")));
+    }
     Ok(())
 }
 

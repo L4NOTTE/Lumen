@@ -17,11 +17,14 @@ class AudioContext{
  createBuffer(channels,length,rate){return {duration:length/rate,copyToChannel(data){assert.equal(data.length,length)}}}
  createBufferSource(){return {connect(){},disconnect(){},start(t){starts.push(t)}}}
 }
-const context={location:{protocol:'chrome-extension:',hostname:'mmioliijnhnoblpgimnlajmefafdfilb'},ipc:{postMessage:m=>commands.push(JSON.parse(m))},AudioContext,AudioDestinationNode,chrome:{tabCapture:{}},addEventListener(){},WeakSet,atob,Uint8Array,Float32Array};context.window=context;
+const button={dispatchEvent(){context.chrome.tabCapture.capture({audio:true},s=>stream=s)}};
+const context={document:{querySelector:()=>button},MouseEvent:class{},location:{protocol:'chrome-extension:',hostname:'mmioliijnhnoblpgimnlajmefafdfilb'},ipc:{postMessage:m=>commands.push(JSON.parse(m))},AudioContext,AudioDestinationNode,chrome:{tabCapture:{}},addEventListener(){},WeakSet,atob,Uint8Array,Float32Array};context.window=context;
 vm.runInNewContext(source,context);
 assert.equal(commands.length,0,'no capture before recognition click');
 let stream;context.chrome.tabCapture.capture({audio:true},s=>stream=s);
-assert.ok(stream);assert.equal(commands[0].cmd,'capture_start');
+assert.equal(stream,undefined);assert.equal(commands[0].cmd,'capture_request');
+context.__lumenApproveAudio();
+assert.ok(stream);assert.equal(commands[1].cmd,'capture_start');
 const pcm=new Float32Array([0.25,-0.25,0.1,-0.1]);context.__lumenAudio(48000,Buffer.from(pcm.buffer).toString('base64'));assert.equal(starts.length,1);
 const node=new context.AudioContext().createMediaStreamSource(stream);node.connect(new AudioDestinationNode());assert.equal(connections,0);node.connect({});assert.equal(connections,1);
 stream.getAudioTracks()[0].stop();assert.equal(commands.at(-1).cmd,'capture_stop');assert.equal(closed,1);

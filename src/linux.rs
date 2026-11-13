@@ -180,16 +180,17 @@ fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
         size: LogicalSize::new(w.max(1.0), h.max(1.0)).into(),
     }
 }
-fn accent(name: &str) -> (&str, &str) {
-    if crate::security::hex_color(name) { return (name, name); }
-    match name {
+fn accent(name: &str) -> (String, String) {
+    if crate::security::hex_color(name) { return (crate::security::accessible_accent(name, false), crate::security::accessible_accent(name, true)); }
+    let (light, dark) = match name {
         "blue" => ("#2563eb", "#60a5fa"),
         "green" => ("#16a34a", "#4ade80"),
         "orange" => ("#ea580c", "#fb923c"),
         "pink" => ("#db2777", "#f472b6"),
         "red" => ("#dc2626", "#f87171"),
         _ => ("#4f46e5", "#8b8dff"),
-    }
+    };
+    (light.into(), dark.into())
 }
 fn font(name: &str) -> &'static str {
     match name {

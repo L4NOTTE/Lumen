@@ -1,6 +1,6 @@
 [package]
 name = "lumen"
-version = "0.4.15"
+version = "0.4.23"
 edition = "2021"
 description = "Lumen — браузер для Windows и Linux на Rust"
 
@@ -23,7 +23,7 @@ spki = { version = "0.7", features = ["std"] }
 zip = { version = "9.5", default-features = false, features = ["deflate"] }
 webview2-com = "0.33"
 windows-core = "0.58"
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_System_Threading", "Win32_Storage_FileSystem"] }
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Shell", "Win32_System_Threading", "Win32_System_SystemInformation", "Win32_Storage_FileSystem"] }
 cpal = "0.15"
 winreg = "0.56"
 image = { version = "0.25", default-features = false, features = ["png"] }

@@ -2,6 +2,8 @@
 (()=>{
  if(location.protocol!=='chrome-extension:'||location.hostname!=='mmioliijnhnoblpgimnlajmefafdfilb'||!window.ipc)return;
  const send=cmd=>window.ipc.postMessage(JSON.stringify({cmd}));
+ const buttonSelector = ".BJ6G5IZZlwRqJcpMnRZt";
+ let approvedUntil=0;
  let context=null,destination=null,stream=null,next=0,active=false;
  const captured=new WeakSet(),create=AudioContext.prototype.createMediaStreamSource;
  AudioContext.prototype.createMediaStreamSource=function(s){const node=create.call(this,s);if(captured.has(s)){const connect=node.connect;node.connect=function(target,...args){if(target instanceof AudioDestinationNode)return target;return connect.call(this,target,...args);};}return node;};
@@ -14,13 +16,33 @@
    next=Math.max(next,context.currentTime+.06);if(next-context.currentTime>1)next=context.currentTime+.06;
    source.start(next);next+=buffer.duration;source.onended=()=>source.disconnect();
  };
- window.__lumenAudioEnd=stop;
+ window.__lumenAudioEnd=()=>{approvedUntil=0;stop();};
  window.__lumenAudioError=error=>{stop();const banner=document.createElement('div');banner.textContent='Lumen: не удалось получить системный звук: '+error;banner.style.cssText='padding:12px;background:#35212a;color:white;font:13px Segoe UI';document.body.prepend(banner);};
  const capture=(_options,callback)=>{
+   if(Date.now() >= approvedUntil){send("capture_request");return;}
+   approvedUntil=0;
    stop();active=true;context=new AudioContext();context.resume().catch(()=>{});destination=context.createMediaStreamDestination();stream=destination.stream;captured.add(stream);next=0;
    for(const track of stream.getAudioTracks()){const end=track.stop.bind(track);track.stop=()=>{end();stop();};}
    send('capture_start');callback(stream);
  };
+ window.__lumenApproveAudio=()=>{
+   if(active)return;
+   approvedUntil=Date.now()+5000;
+   const launch=()=>{
+     if(Date.now()>=approvedUntil)return;
+     const button=document.querySelector(buttonSelector);
+     if(button)button.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+     else setTimeout(launch,50);
+   };
+   launch();
+ 
+ };
  if(!chrome.tabCapture)chrome.tabCapture={};chrome.tabCapture.capture=capture;
+ addEventListener('click',event=>{
+   if(active || Date.now()<approvedUntil || !event.target.closest?.(buttonSelector))return;
+   event.preventDefault();
+   event.stopImmediatePropagation();
+   send('capture_request');
+ },true);
  addEventListener('pagehide',stop);addEventListener('beforeunload',stop);
 })();

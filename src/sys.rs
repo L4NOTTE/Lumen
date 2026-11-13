@@ -68,21 +68,25 @@ pub fn schedule_cleanup(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn hidden(program: &str) -> Command {
-    let system = std::path::PathBuf::from(
-        std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into()),
-    )
-    .join("System32")
-    .join(program);
-    let mut c = Command::new(system);
-    c.creation_flags(CREATE_NO_WINDOW);
-    c
+pub fn hidden(program: &str) -> std::io::Result<Command> {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
+    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+    let mut buffer = [0u16; 32768];
+    let length = unsafe { GetSystemDirectoryW(Some(&mut buffer)) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return Err(std::io::Error::other("cannot locate Windows system directory"));
+    }
+    let system = PathBuf::from(OsString::from_wide(&buffer[..length]));
+    let mut command = Command::new(system.join(program));
+    command.creation_flags(CREATE_NO_WINDOW);
+    Ok(command)
 }
 
 /// Скачивает `url` в `dest`. Возвращает true при успехе.
 pub fn curl_download(url: &str, dest: &Path) -> bool {
-    hidden("curl.exe")
-        .args([
+    let Ok(mut command) = hidden("curl.exe") else { return false; };
+    command.args([
+            "-q",
             "-L",
             "-f",
             "-sS",
