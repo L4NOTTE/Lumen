@@ -1,0 +1,32 @@
+
+running 27 tests
+test crx::tests::rejects_archive_escape_and_devices ... ok
+test default_browser::tests::quoted_commands_and_no_userchoice ... ok
+test downloads::tests::filenames_cannot_escape_folder ... ok
+test ext::tests::rejects_truncated_protobuf_and_crx ... ok
+test ext::tests::store_links_and_invalid_ids ... ok
+test blocker::yandex_tests::ads_are_blocked_without_blocking_weather_or_static_assets ... ok
+test linux_desktop::tests::exec_paths_are_escaped_and_urls_are_not_shell_commands ... ok
+test favicon::tests::invalid_and_oversized_images_are_rejected ... ok
+test filters::security_tests::oversized_lists_and_exhausted_includes_fail_closed ... ok
+test crx::tests::zip_traversal_and_metadata_bombs_are_rejected ... ok
+test regression_tests::dock_fits_small_windows_and_scales_with_dpi ... ok
+test regression_tests::page_shortcuts_have_correct_modifiers ... ok
+test security::tests::backgrounds_cannot_inject_html_or_css ... ok
+test security::tests::internal_bridge_rejects_foreign_documents ... ok
+test security::tests::restricted_dev_and_extension_bridges ... ok
+test regression_tests::site_zoom_survives_settings_round_trip ... ok
+test crx::tests::zip_limits_reject_duplicates_and_links ... ok
+test default_browser::tests::registry_round_trip_in_isolated_test_root ... ok
+test ext::tests::official_crx_ids_are_preserved ... ok
+test downloads::tests::progress_and_cancel_do_not_delete_files ... ok
+test favicon::tests::icons_are_bounded_and_shared ... ok
+test updater::tests::rejects_tampered_expired_and_older_updates ... ok
+test transfer::tests::transfer_is_acknowledged_after_acceptance ... ok
+test updater::tests::payload_hash_is_verified_after_download ... ok
+test security::tests::settings_replace_atomically_without_following_destination_link ... ok
+test crx::tests::malformed_headers_do_not_panic ... ok
+test crx::tests::official_signatures_and_tampering ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.61s
+

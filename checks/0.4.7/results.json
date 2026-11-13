@@ -1,0 +1,62 @@
+[
+  {
+    "name": "custom_accent_applies",
+    "passed": true
+  },
+  {
+    "name": "file_reader_background_works_under_csp",
+    "passed": true
+  },
+  {
+    "name": "download_completes",
+    "passed": true
+  },
+  {
+    "name": "download_keeps_source_tab",
+    "passed": true
+  },
+  {
+    "name": "download_does_not_reload_source",
+    "passed": true
+  },
+  {
+    "name": "redirect_completes",
+    "passed": true
+  },
+  {
+    "name": "redirect_keeps_source_tab",
+    "passed": true
+  },
+  {
+    "name": "redirect_does_not_reload_source",
+    "passed": true
+  },
+  {
+    "name": "same_completes",
+    "passed": true
+  },
+  {
+    "name": "same_keeps_source_tab",
+    "passed": true
+  },
+  {
+    "name": "same_does_not_reload_source",
+    "passed": true
+  },
+  {
+    "name": "ordinary_target_blank_still_opens_foreground",
+    "passed": true
+  },
+  {
+    "name": "download_integrity_fixture (1).bin",
+    "passed": true
+  },
+  {
+    "name": "download_integrity_fixture (2).bin",
+    "passed": true
+  },
+  {
+    "name": "download_integrity_fixture.bin",
+    "passed": true
+  }
+]

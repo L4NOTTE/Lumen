@@ -1,0 +1,17 @@
+{
+  "metric": "Assignments to style.transform in the actual drag preview code, with a mock DOM. This is not a frame rate measurement.",
+  "rows": [
+    {
+      "tabs": 24,
+      "frames": 1200,
+      "before": 28800,
+      "after": 1329
+    },
+    {
+      "tabs": 60,
+      "frames": 1200,
+      "before": 72000,
+      "after": 1561
+    }
+  ]
+}

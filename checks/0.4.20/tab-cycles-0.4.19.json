@@ -1,0 +1,183 @@
+{
+  "runs": [
+    {
+      "exited": true,
+      "startupToFirstLoadMs": 571,
+      "tabCycles": [
+        {
+          "cycle": 1,
+          "peak": {
+            "ids": [
+              3764,
+              3900,
+              6416,
+              7412,
+              7852,
+              8488,
+              10372,
+              15428,
+              15544,
+              16048,
+              16328,
+              16360,
+              16964,
+              17064,
+              21072,
+              22080,
+              22168,
+              24144
+            ],
+            "privateMiB": 725.7,
+            "threads": 333.0,
+            "workingSetMiB": 664.5,
+            "processes": 18
+          },
+          "afterClose": {
+            "ids": [
+              3764,
+              6416,
+              7852,
+              15428,
+              17064,
+              21072,
+              22080,
+              22168
+            ],
+            "privateMiB": 497.8,
+            "threads": 197.0,
+            "workingSetMiB": 552.5,
+            "processes": 8
+          }
+        },
+        {
+          "cycle": 2,
+          "peak": {
+            "ids": [
+              3764,
+              4076,
+              4560,
+              6416,
+              7852,
+              8680,
+              11488,
+              14324,
+              15428,
+              15532,
+              17064,
+              18088,
+              20032,
+              21072,
+              22080,
+              22168,
+              22248,
+              22956
+            ],
+            "privateMiB": 795.1,
+            "threads": 334.0,
+            "workingSetMiB": 728.8,
+            "processes": 18
+          },
+          "afterClose": {
+            "ids": [
+              3764,
+              6416,
+              7852,
+              15428,
+              17064,
+              21072,
+              22080,
+              22168
+            ],
+            "privateMiB": 538.4,
+            "threads": 209.0,
+            "workingSetMiB": 594.5,
+            "processes": 8
+          }
+        },
+        {
+          "cycle": 3,
+          "peak": {
+            "ids": [
+              3764,
+              6416,
+              7852,
+              8532,
+              15428,
+              16184,
+              16756,
+              17064,
+              17096,
+              19220,
+              19664,
+              19672,
+              20724,
+              21072,
+              22080,
+              22168,
+              24216,
+              24224
+            ],
+            "privateMiB": 738.7,
+            "threads": 347.0,
+            "workingSetMiB": 774.5,
+            "processes": 18
+          },
+          "afterClose": {
+            "ids": [
+              3764,
+              6416,
+              7852,
+              15428,
+              17064,
+              21072,
+              22080,
+              22168
+            ],
+            "privateMiB": 464.6,
+            "threads": 210.0,
+            "workingSetMiB": 615.5,
+            "processes": 8
+          }
+        }
+      ],
+      "pageLoadMedianMs": 9.6,
+      "busy": {
+        "ids": [
+          3764,
+          6416,
+          7852,
+          15428,
+          17064,
+          21072,
+          22080,
+          22168
+        ],
+        "privateMiB": 351.2,
+        "threads": 174.0,
+        "workingSetMiB": 569.5,
+        "processes": 8
+      },
+      "closeMs": 178,
+      "idle": {
+        "ids": [
+          3764,
+          6416,
+          7852,
+          15428,
+          17064,
+          21072,
+          22080,
+          22168
+        ],
+        "privateMiB": 322.4,
+        "threads": 193.0,
+        "workingSetMiB": 572.0,
+        "processes": 8
+      },
+      "navigationBatchMs": 209,
+      "observedSurvivors": 0
+    }
+  ],
+  "workload": "Fresh profile, one tab, 12 consecutive local HTTP documents; summed process memory; snapshots after navigation and 9 seconds later.",
+  "executable": "C:\\УЧЕБА\\проекты\\Lumen-0.4.19\\lumen.exe"
+}

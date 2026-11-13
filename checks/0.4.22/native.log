@@ -1,0 +1,60 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling lumen v0.4.22 (C:\УЧЕБА\проекты\lumen-browser\lumen)
+warning: constant `ID` is never used
+ --> src\linux_desktop.rs:3:7
+  |
+3 | const ID: &str = "io.github.L4NOTTE.Lumen.desktop";
+  |       ^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `lumen` (bin "lumen" test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.23s
+     Running unittests src\main.rs (target\debug\deps\lumen-9e079155e99161b0.exe)
+
+running 40 tests
+test blocker::yandex_tests::ads_are_blocked_without_blocking_weather_or_static_assets ... ok
+test crx::tests::malformed_headers_do_not_panic ... ok
+test crx::tests::official_signatures_and_tampering ... ok
+test crx::tests::rejects_archive_escape_and_devices ... ok
+test crx::tests::zip_limits_reject_duplicates_and_links ... ok
+test crx::tests::zip_traversal_and_metadata_bombs_are_rejected ... ok
+test default_browser::tests::quoted_commands_and_no_userchoice ... ok
+test default_browser::tests::registry_round_trip_in_isolated_test_root ... ok
+test downloads::tests::deleted_record_is_not_restored_by_another_window ... ok
+test downloads::tests::filenames_cannot_escape_folder ... ok
+test downloads::tests::progress_and_cancel_do_not_delete_files ... ok
+test ext::tests::official_crx_ids_are_preserved ... ok
+test ext::tests::rejects_truncated_protobuf_and_crx ... ok
+test ext::tests::store_links_and_invalid_ids ... ok
+test favicon::tests::icons_are_bounded_and_shared ... ok
+test favicon::tests::invalid_and_oversized_images_are_rejected ... ok
+test filters::security_tests::oversized_lists_and_exhausted_includes_fail_closed ... ok
+test linux_desktop::tests::exec_paths_are_escaped_and_urls_are_not_shell_commands ... ok
+test regression_tests::animated_window_stays_visible_when_maximized_and_fullscreen ... ok
+test regression_tests::dock_fits_small_windows_and_scales_with_dpi ... ok
+test regression_tests::extension_popup_fits_work_area ... ok
+test regression_tests::page_shortcuts_have_correct_modifiers ... ok
+test regression_tests::same_document_url_and_native_inspector ... ok
+test regression_tests::settings_and_downloads_render_in_webview ... ok
+test regression_tests::shazam_consent_is_a_separate_child_of_the_popup ... ok
+test regression_tests::shazam_library_label_and_arrow_follow_popup_theme ... ok
+test regression_tests::site_zoom_survives_settings_round_trip ... ok
+test regression_tests::start_page_csp_allows_search_and_blocks_inline_injection ... ok
+test regression_tests::web_navigation_rejects_embedded_credentials ... ok
+test regression_tests::webview_leaves_all_native_window_resize_handles_reachable ... ok
+test security::tests::backgrounds_cannot_inject_html_or_css ... ok
+test security::tests::browser_logs_keep_video_id_and_remove_credentials ... ok
+test security::tests::history_append_refuses_hard_link ... ok
+test security::tests::internal_bridge_rejects_foreign_documents ... ok
+test security::tests::newtab_commands_require_window_token_and_https ... ok
+test security::tests::profile_read_rejects_oversized_files_and_directories ... ok
+test security::tests::restricted_dev_and_extension_bridges ... ok
+test security::tests::settings_replace_atomically_without_following_destination_link ... ok
+test updater::tests::payload_hash_is_verified_after_download ... ok
+test updater::tests::rejects_tampered_expired_and_older_updates ... ok
+
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.52s
+

@@ -1,0 +1,183 @@
+{
+  "workload": "Fresh profile, one tab, 12 consecutive local HTTP documents; summed process memory; snapshots after navigation and 9 seconds later.",
+  "executable": "C:\\УЧЕБА\\проекты\\Lumen-0.4.20\\lumen.exe",
+  "runs": [
+    {
+      "idle": {
+        "workingSetMiB": 566.6,
+        "ids": [
+          19576,
+          488,
+          7960,
+          9124,
+          12584,
+          15648,
+          21180,
+          24328
+        ],
+        "privateMiB": 316.8,
+        "processes": 8,
+        "threads": 193.0
+      },
+      "pageLoadMedianMs": 10.2,
+      "tabCycles": [
+        {
+          "afterClose": {
+            "workingSetMiB": 551.1,
+            "ids": [
+              19576,
+              488,
+              7960,
+              9124,
+              12584,
+              15648,
+              21180,
+              24328
+            ],
+            "privateMiB": 494.8,
+            "processes": 8,
+            "threads": 208.0
+          },
+          "cycle": 1,
+          "peak": {
+            "workingSetMiB": 660.9,
+            "ids": [
+              19576,
+              488,
+              2288,
+              3240,
+              5192,
+              7136,
+              7960,
+              9124,
+              12584,
+              15400,
+              15648,
+              18572,
+              19672,
+              20312,
+              20340,
+              20376,
+              21180,
+              24328
+            ],
+            "privateMiB": 725.5,
+            "processes": 18,
+            "threads": 345.0
+          }
+        },
+        {
+          "afterClose": {
+            "workingSetMiB": 594.8,
+            "ids": [
+              19576,
+              488,
+              7960,
+              9124,
+              12584,
+              15648,
+              21180,
+              24328
+            ],
+            "privateMiB": 537.0,
+            "processes": 8,
+            "threads": 220.0
+          },
+          "cycle": 2,
+          "peak": {
+            "workingSetMiB": 714.1,
+            "ids": [
+              19576,
+              488,
+              1944,
+              2388,
+              2516,
+              6852,
+              7960,
+              9124,
+              12396,
+              12584,
+              13472,
+              15648,
+              17320,
+              17916,
+              21180,
+              21300,
+              22900,
+              24328
+            ],
+            "privateMiB": 782.2,
+            "processes": 18,
+            "threads": 345.0
+          }
+        },
+        {
+          "afterClose": {
+            "workingSetMiB": 617.3,
+            "ids": [
+              19576,
+              488,
+              7960,
+              9124,
+              12584,
+              15648,
+              21180,
+              24328
+            ],
+            "privateMiB": 463.7,
+            "processes": 8,
+            "threads": 219.0
+          },
+          "cycle": 3,
+          "peak": {
+            "workingSetMiB": 779.0,
+            "ids": [
+              19576,
+              488,
+              5776,
+              6008,
+              7960,
+              9124,
+              12532,
+              12584,
+              15648,
+              16604,
+              19920,
+              21180,
+              22680,
+              24052,
+              24328,
+              25292,
+              25420,
+              25492
+            ],
+            "privateMiB": 734.2,
+            "processes": 18,
+            "threads": 356.0
+          }
+        }
+      ],
+      "startupToFirstLoadMs": 560,
+      "exited": true,
+      "closeMs": 140,
+      "busy": {
+        "workingSetMiB": 565.8,
+        "ids": [
+          19576,
+          488,
+          7960,
+          9124,
+          12584,
+          15648,
+          21180,
+          24328
+        ],
+        "privateMiB": 346.9,
+        "processes": 8,
+        "threads": 174.0
+      },
+      "observedSurvivors": 0,
+      "navigationBatchMs": 223
+    }
+  ]
+}

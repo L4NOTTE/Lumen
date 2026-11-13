@@ -1,0 +1,129 @@
+{
+  "workload": "Fresh profile, one tab, 12 consecutive local HTTP documents; summed process memory; snapshots after navigation and 9 seconds later.",
+  "executable": "C:\\УЧЕБА\\проекты\\Lumen-0.4.20\\lumen.exe",
+  "runs": [
+    {
+      "idle": {
+        "workingSetMiB": 573.2,
+        "ids": [
+          8132,
+          2060,
+          4276,
+          7252,
+          12400,
+          18216,
+          24936,
+          25420
+        ],
+        "privateMiB": 319.3,
+        "processes": 8,
+        "threads": 193.0
+      },
+      "pageLoadMedianMs": 9.0,
+      "tabCycles": null,
+      "startupToFirstLoadMs": 1469,
+      "exited": true,
+      "closeMs": 135,
+      "busy": {
+        "workingSetMiB": 572.3,
+        "ids": [
+          8132,
+          2060,
+          4276,
+          7252,
+          12400,
+          18216,
+          24936,
+          25420
+        ],
+        "privateMiB": 348.3,
+        "processes": 8,
+        "threads": 175.0
+      },
+      "observedSurvivors": 0,
+      "navigationBatchMs": 211
+    },
+    {
+      "idle": {
+        "workingSetMiB": 573.3,
+        "ids": [
+          17500,
+          8144,
+          9800,
+          14556,
+          19308,
+          22080,
+          23208,
+          24260
+        ],
+        "privateMiB": 322.7,
+        "processes": 8,
+        "threads": 193.0
+      },
+      "pageLoadMedianMs": 9.6,
+      "tabCycles": null,
+      "startupToFirstLoadMs": 578,
+      "exited": true,
+      "closeMs": 127,
+      "busy": {
+        "workingSetMiB": 573.1,
+        "ids": [
+          17500,
+          8144,
+          9800,
+          14556,
+          19308,
+          22080,
+          23208,
+          24260
+        ],
+        "privateMiB": 353.8,
+        "processes": 8,
+        "threads": 174.0
+      },
+      "observedSurvivors": 0,
+      "navigationBatchMs": 217
+    },
+    {
+      "idle": {
+        "workingSetMiB": 570.0,
+        "ids": [
+          16612,
+          4716,
+          15132,
+          18624,
+          21468,
+          22152,
+          23432,
+          23576
+        ],
+        "privateMiB": 322.1,
+        "processes": 8,
+        "threads": 192.0
+      },
+      "pageLoadMedianMs": 8.8,
+      "tabCycles": null,
+      "startupToFirstLoadMs": 543,
+      "exited": true,
+      "closeMs": 126,
+      "busy": {
+        "workingSetMiB": 567.8,
+        "ids": [
+          16612,
+          4716,
+          15132,
+          18624,
+          21468,
+          22152,
+          23432,
+          23576
+        ],
+        "privateMiB": 351.2,
+        "processes": 8,
+        "threads": 175.0
+      },
+      "observedSurvivors": 0,
+      "navigationBatchMs": 203
+    }
+  ]
+}

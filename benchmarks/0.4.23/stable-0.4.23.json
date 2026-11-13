@@ -1,0 +1,66 @@
+{
+  "sha256": "3FC9635DD13AF65AB84D3BC6AB07C436CB46E2C4A5ABF8E01E6A671D2B8791A2",
+  "method": "Windows UI Automation. One warmup followed by measured runs on one isolated profile. Memory after two seconds of idle at each tab count.",
+  "runs": [
+    {
+      "startupUiAutomationMs": 543.3,
+      "createTabMeanMs": 358.53,
+      "rows": [
+        {
+          "usage": {
+            "privateMiB": 273.5,
+            "processes": 8,
+            "workingSetMiB": 460.5
+          },
+          "tabs": 1
+        },
+        {
+          "usage": {
+            "privateMiB": 425.1,
+            "processes": 12,
+            "workingSetMiB": 501.4
+          },
+          "tabs": 5
+        },
+        {
+          "usage": {
+            "privateMiB": 844.1,
+            "processes": 27,
+            "workingSetMiB": 626.5
+          },
+          "tabs": 20
+        }
+      ]
+    },
+    {
+      "startupUiAutomationMs": 547.6,
+      "createTabMeanMs": 363.74,
+      "rows": [
+        {
+          "usage": {
+            "privateMiB": 274.7,
+            "processes": 8,
+            "workingSetMiB": 457.0
+          },
+          "tabs": 1
+        },
+        {
+          "usage": {
+            "privateMiB": 402.9,
+            "processes": 12,
+            "workingSetMiB": 495.4
+          },
+          "tabs": 5
+        },
+        {
+          "usage": {
+            "privateMiB": 848.2,
+            "processes": 27,
+            "workingSetMiB": 632.8
+          },
+          "tabs": 20
+        }
+      ]
+    }
+  ]
+}

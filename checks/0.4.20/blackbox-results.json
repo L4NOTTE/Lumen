@@ -1,0 +1,102 @@
+[
+  {
+    "name": "fixture_regular_cookie_and_storage",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "regular_url_token_absent_in_history",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "regular_url_token_absent_in_session",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "legacy_history_url_redacted",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "legacy_download_url_redacted",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "private_cannot_read_regular_cookie",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "private_cannot_read_regular_storage",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "fixture_private_cookie_written",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "private_url_not_in_regular_history",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "private_url_not_in_regular_session",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "cross_origin_referrer_omits_secret",
+    "passed": true,
+    "details": {
+      "referer": "http://127.0.0.1:50642/"
+    }
+  },
+  {
+    "name": "geolocation_denied",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "page_cannot_close_browser",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "page_cannot_change_startup",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "forged_start_page_command_blocked",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "requested_cdp_endpoint_inactive",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "private_profile_exists_during_session",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "forced_exit_removes_private_profile",
+    "passed": true,
+    "details": {}
+  },
+  {
+    "name": "private_canary_absent_from_readable_residual_files",
+    "passed": true,
+    "details": {
+      "scannedBytes": 0,
+      "matchingFiles": []
+    }
+  }
+]
