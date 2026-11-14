@@ -46,6 +46,27 @@ impl State {
         seq
     }
 }
+const ICON_SIZE: u32 = 48;
+const MAX_PNG_BYTES: usize = 10 * 1024;
+
+pub fn valid_tile_icon(icon: &str) -> bool {
+    let Some(encoded) = icon.strip_prefix("data:image/png;base64,") else { return false; };
+    if encoded.len() > MAX_PNG_BYTES.div_ceil(3) * 4 { return false; }
+    base64::engine::general_purpose::STANDARD.decode(encoded).is_ok_and(|png| {
+        if png.len() > MAX_PNG_BYTES || !png.starts_with(b"\x89PNG\r\n\x1a\n")
+            || png.get(12..16) != Some(b"IHDR")
+        {
+            return false;
+        }
+        png.get(16..24).is_some_and(|dimensions| {
+            dimensions.chunks_exact(4).all(|dimension| {
+                let size = u32::from_be_bytes(dimension.try_into().unwrap());
+                (1..=ICON_SIZE).contains(&size)
+            })
+        })
+    })
+}
+
 fn normalize(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.len() > 65536
         || bytes.get(..8) != Some(b"\x89PNG\r\n\x1a\n")
@@ -64,17 +85,17 @@ fn normalize(bytes: &[u8]) -> Option<Vec<u8>> {
     limits.max_image_height = Some(256);
     limits.max_alloc = Some(1024 * 1024);
     reader.limits(limits);
-    let image = image::DynamicImage::ImageRgba8(
-        reader
-            .decode()
-            .ok()?
-            .resize_exact(32, 32, image::imageops::FilterType::Triangle)
-            .to_rgba8(),
-    );
+    let image = reader.decode().ok()?;
+    let image = if width > ICON_SIZE || height > ICON_SIZE {
+        image.resize(ICON_SIZE, ICON_SIZE, image::imageops::FilterType::Lanczos3)
+    } else {
+        image
+    };
+    let image = image::DynamicImage::ImageRgba8(image.to_rgba8());
     let mut png = Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png).ok()?;
     let png = png.into_inner();
-    (png.len() <= 8192).then_some(png)
+    (png.len() <= MAX_PNG_BYTES).then_some(png)
 }
 impl Cache {
     fn get(&mut self, bytes: &[u8]) -> Option<Rc<Icon>> {
@@ -203,9 +224,9 @@ pub fn install(
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn png() -> Vec<u8> {
+    fn png_with_size(width: u32, height: u32) -> Vec<u8> {
         let mut out = Cursor::new(Vec::new());
-        image::DynamicImage::new_rgba8(64, 64)
+        image::DynamicImage::new_rgba8(width, height)
             .write_to(&mut out, image::ImageFormat::Png)
             .unwrap();
         out.into_inner()
@@ -213,24 +234,40 @@ mod tests {
     #[test]
     fn icons_are_bounded_and_shared() {
         let mut cache = Cache::default();
-        let a = cache.get(&png()).unwrap();
-        let b = cache.get(&png()).unwrap();
+        let a = cache.get(&png_with_size(64, 64)).unwrap();
+        let b = cache.get(&png_with_size(64, 64)).unwrap();
         assert!(Rc::ptr_eq(&a, &b));
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(a.data.split_once(',').unwrap().1)
             .unwrap();
         let image = image::load_from_memory(&bytes).unwrap();
-        assert_eq!((image.width(), image.height()), (32, 32));
+        assert_eq!((image.width(), image.height()), (48, 48));
+        assert!(valid_tile_icon(&a.data));
+        let mut legacy = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(32, 32)
+            .write_to(&mut legacy, image::ImageFormat::Png)
+            .unwrap();
+        let legacy = base64::engine::general_purpose::STANDARD.encode(legacy.into_inner());
+        assert!(valid_tile_icon(&format!("data:image/png;base64,{legacy}")));
         let weak = Rc::downgrade(&a);
         drop(a);
         drop(b);
         assert!(weak.upgrade().is_none());
     }
     #[test]
+    fn small_icons_keep_their_native_dimensions() {
+        let png = normalize(&png_with_size(16, 24)).unwrap();
+        let image = image::load_from_memory(&png).unwrap();
+        assert_eq!((image.width(), image.height()), (16, 24));
+        let encoded = base64::engine::general_purpose::STANDARD.encode(png);
+        assert!(valid_tile_icon(&format!("data:image/png;base64,{encoded}")));
+    }
+
+    #[test]
     fn invalid_and_oversized_images_are_rejected() {
         assert!(normalize(b"not PNG").is_none());
         assert!(normalize(&vec![0; 65537]).is_none());
-        let mut bytes = png();
+        let mut bytes = png_with_size(64, 64);
         bytes[16..20].copy_from_slice(&100000u32.to_be_bytes());
         assert!(normalize(&bytes).is_none());
     }

@@ -268,6 +268,130 @@ mod tests {
         assert!(extract_id("zmioliijnhnoblpgimnlajmefafdfilb").is_none());
     }
     #[test]
+    #[ignore = "Requires WebView2 and official CRX fixtures"]
+    fn official_extensions_register_and_open_popups_in_fresh_webview_profile() {
+        const SHAZAM: &str = "mmioliijnhnoblpgimnlajmefafdfilb";
+        use tao::{event::Event, event_loop::{ControlFlow, EventLoopBuilder},
+            platform::{run_return::EventLoopExtRunReturn, windows::EventLoopBuilderExtWindows},
+            window::WindowBuilder};
+        use std::time::{Duration, Instant};
+        use wry::WebViewBuilderExtWindows;
+
+        let fixtures = std::path::PathBuf::from(std::env::var_os("LUMEN_CRX_FIXTURES").unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let mut events = EventLoopBuilder::<Result<String, String>>::with_user_event()
+            .with_any_thread(true).build();
+        let window = WindowBuilder::new().with_visible(false).build(&events).unwrap();
+        let mut context = wry::WebContext::new(Some(dir.path().join("profile")));
+        let view = wry::WebViewBuilder::with_web_context(&mut context)
+            .with_browser_extensions_enabled(true)
+            .with_html("<!doctype html><title>Extension test</title>")
+            .build_as_child(&window).unwrap();
+        let mut expected = Vec::new();
+        for (file, id) in [
+            ("shazam.crx", SHAZAM),
+            ("vknext.crx", "jephanpkonkmnkekmlkcijdjgniikppl"),
+        ] {
+            let bytes = std::fs::read(fixtures.join(file)).unwrap();
+            let verified = crate::crx::verify(&bytes, id).unwrap();
+            let path = dir.path().join(id);
+            std::fs::create_dir(&path).unwrap();
+            crate::crx::extract(verified.archive, &path).unwrap();
+            let metadata = path.join("_metadata");
+            if metadata.is_dir() { std::fs::remove_dir_all(metadata).unwrap(); }
+            let manifest = path.join("manifest.json");
+            let mut json: serde_json::Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+            json["key"] = verified.key.into();
+            std::fs::write(manifest, serde_json::to_vec(&json).unwrap()).unwrap();
+            let proxy = events.create_proxy();
+            add(&view, &path, move |result| { let _ = proxy.send_event(result); });
+            expected.push(id.to_string());
+        }
+        let deadline = Instant::now() + Duration::from_secs(12);
+        let mut installed = Vec::new();
+        events.run_return(|event, _, flow| {
+            *flow = ControlFlow::WaitUntil(deadline);
+            if let Event::UserEvent(result) = event { installed.push(result.unwrap()); }
+            if installed.len() == expected.len() || Instant::now() >= deadline { *flow = ControlFlow::Exit; }
+        });
+        installed.sort();
+        expected.sort();
+        assert_eq!(installed, expected);
+
+        let mut popups = Vec::new();
+        for id in &expected {
+            let url = format!("chrome-extension://{id}/popup.html");
+            let extension = id.clone();
+            let sender = extension.clone();
+            let proxy = events.create_proxy();
+            let popup = wry::WebViewBuilder::with_web_context(&mut context)
+                .with_browser_extensions_enabled(true)
+                .with_navigation_handler(move |uri| crate::security::extension_origin(&uri, &extension))
+                .with_new_window_req_handler(|_| false)
+                .with_ipc_handler(move |request| {
+                    if crate::security::extension_origin(&request.uri().to_string(), &sender) {
+                        let _ = proxy.send_event(Ok(request.body().clone()));
+                    }
+                })
+                .with_initialization_script(include_str!("shazam-capture.js"))
+                .with_initialization_script(r#"
+                    addEventListener('load', () => setTimeout(async () => {
+                        const result = {id: location.hostname, title: document.title,
+                            runtime: chrome.runtime?.id,
+                            capture: typeof window.__lumenApproveAudio === 'function',
+                            shazamButton: !!document.querySelector('.BJ6G5IZZlwRqJcpMnRZt')};
+                        try {
+                            const store = chrome.storage.local;
+                            await store.set({lumenPopupProbe: result.id});
+                            result.storage = (await store.get('lumenPopupProbe')).lumenPopupProbe === result.id;
+                            await store.remove('lumenPopupProbe');
+                        } catch (error) { result.error = String(error); }
+                        if (!result.capture) {
+                            try {
+                                result.worker = await Promise.race([
+                                    chrome.runtime.sendMessage({type: 'lumen_popup_probe'}),
+                                    new Promise(resolve => setTimeout(() => resolve(false), 3000))
+                                ]) === true;
+                            } catch (error) { result.workerError = String(error); }
+                        }
+                        window.ipc.postMessage(JSON.stringify(result));
+                    }, 1000));
+                "#)
+                .with_url(&url)
+                .build_as_child(&window).unwrap();
+            popups.push(popup);
+        }
+        let deadline = Instant::now() + Duration::from_secs(12);
+        let mut reports = Vec::new();
+        let mut capture_requested = false;
+        events.run_return(|event, _, flow| {
+            *flow = ControlFlow::WaitUntil(deadline);
+            if let Event::UserEvent(message) = event {
+                let report: serde_json::Value = serde_json::from_str(&message.unwrap()).unwrap();
+                assert_ne!(report["cmd"], "capture_start", "capture started without consent");
+                capture_requested |= report["cmd"] == "capture_request";
+                if report["id"].is_string() {
+                    println!("{report}");
+                    reports.push(report);
+                }
+            }
+            if reports.len() == expected.len() || Instant::now() >= deadline { *flow = ControlFlow::Exit; }
+        });
+        assert!(capture_requested, "Shazam did not request consent");
+        for id in expected {
+            let report = reports.iter().find(|row| row["id"] == id).expect("popup did not load");
+            assert_eq!(report["runtime"], id);
+            assert_eq!(report["storage"], true);
+            if id == SHAZAM {
+                assert_eq!(report["capture"], true);
+                assert_eq!(report["shazamButton"], true);
+            } else {
+                assert_eq!(report["worker"], true, "{report}");
+            }
+        }
+    }
+
+    #[test]
     fn rejects_truncated_protobuf_and_crx() {
         assert!(protobuf_fields(&[0x12, 0x7f, 0x01]).is_none());
         assert!(protobuf_fields(&[0x80; 12]).is_none());

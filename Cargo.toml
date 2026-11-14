@@ -1,6 +1,6 @@
 [package]
 name = "lumen"
-version = "0.4.25"
+version = "0.4.57"
 edition = "2021"
 description = "Lumen — браузер для Windows и Linux на Rust"
 
@@ -48,3 +48,10 @@ strip = true
 [patch.crates-io]
 # GTK3 requires glib 0.18; backport the upstream VariantStrIter fix.
 glib = { path = "vendor/glib" }
+
+# Compatibility backports for the existing WebView and GTK3 stack.
+tao = { path = "vendor/tao-0.30.8" }
+selectors = { path = "vendor/selectors-0.22.0" }
+phf_generator = { path = "vendor/phf_generator-0.8.0" }
+glib-macros = { path = "vendor/glib-macros-0.18.5" }
+gtk3-macros = { path = "vendor/gtk3-macros-0.18.2" }

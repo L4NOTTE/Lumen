@@ -13,8 +13,10 @@
   if (yandexHost) Element.prototype.attachShadow = function(options) {
     const root = attachShadow.call(this, options);
     shadowRoots.add(new WeakRef(root));
-    new MutationObserver(() => schedule()).observe(root, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['href','aria-label','title','src']});
-    schedule();
+    new MutationObserver(() => {
+      if (window.__lumenCfg.labels) schedule();
+    }).observe(root, {childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['href','aria-label','title','src']});
+    if (window.__lumenCfg.labels) schedule();
     return root;
   };
 
@@ -154,10 +156,9 @@
     const seeds = new Set();
     queryWithin(scope, 'a[href], [aria-label], [title], span, small').forEach(el => {
       const href=el.getAttribute('href')||'';
-      const text=(el.textContent||'').replace(/\s+/g,' ').trim();
       if (/^https?:\/\/(?:yabs\.yandex\.[^/]+|an\.yandex\.[^/]+)\//i.test(href) ||
           isLabel(el.getAttribute('aria-label')) || isLabel(el.getAttribute('title')) ||
-          (el.children.length < 4 && isLabel(text))) seeds.add(el);
+          (el.children.length < 4 && isLabel((el.textContent||'').replace(/\s+/g,' ').trim()))) seeds.add(el);
     });
     for (const seed of seeds) {
       let best=null;
@@ -202,12 +203,24 @@
     }
   };
   const schedule = () => {
-    if (timer) return;
+    if (timer || (!rules.length && !window.__lumenCfg.labels)) return;
     timer = setTimeout(run, Math.max(300, 1000 - (Date.now() - last)));
   };
-  window.__lumenSetRules = (arr) => { rules = Array.isArray(arr) ? arr : []; fullScan = true; schedule(); };
-  window.__lumenSetLabels = enabled => { window.__lumenCfg.labels = !!enabled; fullScan = true; schedule(); };
-  new MutationObserver(changed).observe(document, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['href','aria-label','title','src'] });
+  const observer = new MutationObserver(changed);
+  function updateObserver() {
+    if (rules.length || window.__lumenCfg.labels) {
+      observer.observe(document, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['href','aria-label','title','src'] });
+      fullScan = true;
+      schedule();
+    } else {
+      observer.disconnect();
+      clearTimeout(timer);
+      timer = 0;
+      dirty.clear();
+    }
+  }
+  window.__lumenSetRules = (arr) => { rules = Array.isArray(arr) ? arr : []; updateObserver(); };
+  window.__lumenSetLabels = enabled => { window.__lumenCfg.labels = !!enabled; updateObserver(); };
+  updateObserver();
   document.addEventListener('DOMContentLoaded', () => { fullScan = true; schedule(); });
-  schedule();
 })();

@@ -60,7 +60,10 @@ pub struct Manager {
     dirty: bool,
     notice: Option<String>,
     active: Arc<AtomicBool>,
+    #[cfg(target_os = "windows")]
+    wake: Arc<dyn Fn() -> bool + Send + Sync>,
     alive: Arc<AtomicBool>,
+    poller: std::thread::Thread,
     #[cfg(target_os = "linux")]
     contexts: Vec<gtk::glib::WeakRef<webkit2gtk::WebContext>>,
 }
@@ -93,7 +96,7 @@ pub fn filename(suggested: &str) -> String {
     name
 }
 impl Manager {
-    pub fn new(dir: &Path, private: bool, tick: impl Fn() -> bool + Send + 'static) -> Shared {
+    pub fn new(dir: &Path, private: bool, tick: impl Fn() -> bool + Send + Sync + 'static) -> Shared {
         let history = dir.join("downloads.json");
         let mut records: Vec<Record> = if private {
             Vec::new()
@@ -119,11 +122,15 @@ impl Manager {
         let active = Arc::new(AtomicBool::new(false));
         let alive = Arc::new(AtomicBool::new(true));
         let (a, b) = (active.clone(), alive.clone());
-        std::thread::spawn(move || {
+        let wake = Arc::new(tick);
+        let tick = wake.clone();
+        let worker = std::thread::spawn(move || {
             while b.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(200));
-                if a.load(Ordering::Relaxed) && !tick() {
-                    break;
+                if a.load(Ordering::Acquire) {
+                    if !tick() { break; }
+                    std::thread::park_timeout(Duration::from_millis(200));
+                } else {
+                    std::thread::park();
                 }
             }
         });
@@ -137,7 +144,10 @@ impl Manager {
             dirty: false,
             notice: None,
             active,
+            #[cfg(target_os = "windows")]
+            wake,
             alive,
+            poller: worker.thread().clone(),
             #[cfg(target_os = "linux")]
             contexts: Vec::new(),
         };
@@ -211,7 +221,8 @@ impl Manager {
         self.tasks.insert(id.clone(), task);
         self.dirty = true;
         self.notice = Some(format!("Загрузка: {}", self.records[0].name));
-        self.active.store(true, Ordering::Relaxed);
+        self.active.store(true, Ordering::Release);
+        self.poller.unpark();
         self.save_changes(&[id.as_str()]);
         id
     }
@@ -254,6 +265,7 @@ impl Manager {
     pub fn poll(&mut self) -> bool {
         let mut changed = std::mem::take(&mut self.dirty);
         let mut ended = Vec::new();
+        let mut failures = Vec::new();
         for r in &mut self.records {
             if let Some(task) = self.tasks.get(&r.id) {
                 let p = task.progress();
@@ -265,19 +277,21 @@ impl Manager {
                     r.received = p.received;
                     r.total = p.total;
                     r.status = p.status.into();
+                    if p.status == "running" && r.error != p.error {
+                        if let Some(message) = &p.error {
+                            failures.push(format!("{} — {message}", r.name));
+                        }
+                    }
                     r.error = p.error;
                     changed = true;
                 }
                 if r.status != "running" {
-                    self.notice = Some(format!(
-                        "{}: {}",
-                        if r.status == "completed" {
-                            "Загружено"
-                        } else {
-                            "Загрузка прервана"
-                        },
-                        r.name
-                    ));
+                    if r.status == "completed" {
+                        self.notice = Some(format!("Загружено: {}", r.name));
+                    } else {
+                        let reason = r.error.as_deref().unwrap_or("Загрузка прервана");
+                        failures.push(format!("{} — {reason}", r.name));
+                    }
                     self.tasks.remove(&r.id);
                     ended.push(r.id.clone());
                 }
@@ -287,6 +301,7 @@ impl Manager {
         if !ended.is_empty() {
             self.save_changes(&ended.iter().map(String::as_str).collect::<Vec<_>>());
         }
+        if !failures.is_empty() { self.notice = Some(failures.join("\n")); }
         changed
     }
     pub fn action(&mut self, id: &str, action: &str) {
@@ -332,6 +347,7 @@ impl Manager {
 impl Drop for Manager {
     fn drop(&mut self) {
         self.alive.store(false, Ordering::Relaxed);
+        self.poller.unpark();
     }
 }
 fn open_path(path: &Path, folder: bool) {
@@ -359,23 +375,87 @@ mod native_windows {
     use super::*;
     use webview2_com::{
         take_pwstr, DownloadStartingEventHandler,
-        Microsoft::Web::WebView2::Win32::*, NavigationStartingEventHandler,
+        Microsoft::Web::WebView2::Win32::*, NavigationStartingEventHandler, StateChangedEventHandler,
     };
     use windows_core::{Interface, HSTRING, PWSTR};
     use wry::WebViewExtWindows;
-    // Poll on the GUI thread; keep the operation alive even when callbacks are missed.
-    struct Native(ICoreWebView2DownloadOperation);
+    // Poll on the GUI thread, with an immediate wake on native state changes.
+    struct Native {
+        operation: ICoreWebView2DownloadOperation,
+        path: PathBuf,
+        last_progress: std::cell::Cell<(i64, std::time::Instant)>,
+        finalizing_since: std::cell::Cell<Option<std::time::Instant>>,
+    }
+
+    const FINALIZATION_WAIT: Duration = Duration::from_secs(5);
+
+    fn saved_file_matches(path: &Path, expected: i64) -> bool {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        if expected <= 0 || !fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file()) {
+            return false;
+        }
+        // A file still open for writing is not ready to expose as completed.
+        fs::OpenOptions::new().read(true).share_mode(0).open(path)
+            .and_then(|file| file.metadata())
+            .is_ok_and(|meta| meta.is_file() && meta.len() == expected as u64)
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn saved_file_requires_full_size_and_no_open_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("download.bin");
+        assert!(!saved_file_matches(&path, 4));
+        fs::write(&path, b"done").unwrap();
+        assert!(!saved_file_matches(&path, 5));
+        let writer = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        assert!(!saved_file_matches(&path, 4));
+        drop(writer);
+        assert!(saved_file_matches(&path, 4));
+    }
+
+    impl Native {
+        fn missing_file(&self, received: i64, total: i64, completed: bool) -> bool {
+            if !completed && (total <= 0 || received < total) {
+                self.finalizing_since.set(None);
+                return false;
+            }
+            if !matches!(self.path.try_exists(), Ok(false)) {
+                self.finalizing_since.set(None);
+                return false;
+            }
+            let now = std::time::Instant::now();
+            let since = self.finalizing_since.get().unwrap_or(now);
+            self.finalizing_since.set(Some(since));
+            completed || now.duration_since(since) >= FINALIZATION_WAIT
+        }
+    }
     impl Task for Native {
         fn progress(&self) -> Progress {
             unsafe {
                 let (mut received, mut total) = (0i64, 0i64);
                 let mut state = COREWEBVIEW2_DOWNLOAD_STATE::default();
-                let _ = self.0.BytesReceived(&mut received);
-                let _ = self.0.TotalBytesToReceive(&mut total);
-                let ok = self.0.State(&mut state).is_ok();
-                let status = if !ok {
+                let _ = self.operation.BytesReceived(&mut received);
+                let _ = self.operation.TotalBytesToReceive(&mut total);
+                let ok = self.operation.State(&mut state).is_ok();
+                let missing = ok && state != COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED
+                    && self.missing_file(received, total, state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED);
+                let (previous, last_change) = self.last_progress.get();
+                if received != previous {
+                    self.last_progress.set((received, std::time::Instant::now()));
+                }
+                let stalled_near_end = ok
+                    && state == COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS
+                    && received > 0
+                    && (total <= 0 || received >= total - total / 200)
+                    && received == previous
+                    && last_change.elapsed() >= FINALIZATION_WAIT;
+                let saved = ok && state == COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS
+                    && total > 0 && received >= total && saved_file_matches(&self.path, total);
+                let status = if !ok || missing {
                     "failed"
-                } else if state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
+                } else if state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED || saved {
                     "completed"
                 } else if state == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED {
                     "failed"
@@ -386,10 +466,24 @@ mod native_windows {
                     received: received.max(0) as u64,
                     total: (total > 0).then_some(total as u64),
                     status,
-                    error: if status == "failed" {
+                    error: if missing {
+                        Some("Файл не появился в папке загрузок. Проверьте журнал защиты антивируса.".into())
+                    } else if status == "failed" {
                         let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON::default();
-                        let _ = self.0.InterruptReason(&mut reason);
-                        Some(format!("Загрузка прервана ({})", reason.0))
+                        let _ = self.operation.InterruptReason(&mut reason);
+                        Some(match reason {
+                            COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_MALICIOUS =>
+                                "Загрузка заблокирована: обнаружен вредоносный файл".into(),
+                            COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED_BY_POLICY =>
+                                "Загрузка заблокирована политикой безопасности".into(),
+                            COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_SECURITY_CHECK_FAILED =>
+                                "Не удалось выполнить проверку безопасности файла".into(),
+                            COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED =>
+                                "Нет доступа для сохранения файла".into(),
+                            _ => format!("Загрузка прервана ({})", reason.0),
+                        })
+                    } else if stalled_near_end {
+                        Some("Загрузка не продвигается 5 секунд. Если файл был заблокирован, проверьте журнал защиты антивируса.".into())
                     } else {
                         None
                     },
@@ -398,7 +492,7 @@ mod native_windows {
         }
         fn cancel(&self) {
             unsafe {
-                let _ = self.0.Cancel();
+                let _ = self.operation.Cancel();
             }
         }
     }
@@ -447,7 +541,21 @@ mod native_windows {
                         Ok(path) => {
                             args.SetResultFilePath(&HSTRING::from(path.as_os_str()))?;
                             args.SetHandled(true)?;
-                            let task = Box::new(Native(op));
+                            let wake = manager.borrow().wake.clone();
+                            // Queue the event to avoid borrowing the manager inside a COM callback.
+                            let _ = op.add_StateChanged(
+                                &StateChangedEventHandler::create(Box::new(move |_, _| {
+                                    wake();
+                                    Ok(())
+                                })),
+                                &mut Default::default(),
+                            );
+                            let task = Box::new(Native {
+                                operation: op,
+                                path: path.clone(),
+                                last_progress: std::cell::Cell::new((0, std::time::Instant::now())),
+                                finalizing_since: std::cell::Cell::new(None),
+                            });
                             if let Some((id, _)) = retry {
                                 let previous = manager.borrow_mut().tasks.remove(&id).unwrap();
                                 manager.borrow_mut().tasks.insert(

@@ -5,6 +5,13 @@ fn hash_scripts(name: &str) {
     let html = std::fs::read_to_string(format!("ui/{name}"))
         .expect("UI source")
         .replace("\r\n", "\n");
+    let html = if name == "ui.html" {
+        println!("cargo:rerun-if-changed=assets/developer-avatar.png");
+        let avatar = std::fs::read("assets/developer-avatar.png").expect("developer avatar");
+        html.replace("__DEVELOPER_AVATAR__", &base64::engine::general_purpose::STANDARD.encode(avatar))
+    } else {
+        html
+    };
     let mut hashes = Vec::new();
     for block in html.split("<script>").skip(1) {
         let script = block.split_once("</script>").expect("closed UI script").0;

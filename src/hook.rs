@@ -51,6 +51,7 @@ pub fn lock_down(wv: &WebView) -> windows_core::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn source(wv: &WebView) -> Option<String> {
     let core = unsafe { wv.controller().CoreWebView2() }.ok()?;
     read_source(&core).ok()
@@ -108,14 +109,13 @@ pub fn install_popup_outcome(wv:&WebView, committed:impl Fn()+'static, download:
     unsafe {
         let core=wv.controller().CoreWebView2()?;
         let mut token=Default::default();
-        core.add_NavigationCompleted(&webview2_com::NavigationCompletedEventHandler::create(Box::new(move|_,args|{
-            if let Some(args)=args {
-                let mut success=windows::Win32::Foundation::BOOL::default();
-                args.IsSuccess(&mut success)?;
-                if success.as_bool(){committed();}
-            }
-            Ok(())
-        })),&mut token)?;
+        core.add_ContentLoading(
+            &webview2_com::ContentLoadingEventHandler::create(Box::new(move |_, _| {
+                committed();
+                Ok(())
+            })),
+            &mut token,
+        )?;
         core.cast::<ICoreWebView2_4>()?.add_DownloadStarting(&webview2_com::DownloadStartingEventHandler::create(Box::new(move|_,_|{
             download();Ok(())
         })),&mut token)?;
@@ -123,9 +123,10 @@ pub fn install_popup_outcome(wv:&WebView, committed:impl Fn()+'static, download:
     Ok(())
 }
 
-pub fn install_link_gestures(
+pub fn install_page_signals(
     wv: &WebView,
     gesture: Rc<std::cell::Cell<Option<std::time::Instant>>>,
+    protect_draft: Rc<std::cell::Cell<bool>>,
 ) -> windows_core::Result<()> {
     unsafe {
         let mut token = Default::default();
@@ -135,6 +136,10 @@ pub fn install_link_gestures(
                 let mut text = PWSTR::null();
                 args.TryGetWebMessageAsString(&mut text)?;
                 let text = take_pwstr(text);
+                if text == "lumen-protect-draft" {
+                    protect_draft.set(true);
+                    return Ok(());
+                }
                 if text.len() > 1024 {
                     return Ok(());
                 }

@@ -66,14 +66,9 @@ impl Filters {
         let mut any = false;
         let mut combined = 0u64;
         let mut add = |path: &Path| {
-            let Ok(size) = fs::metadata(path).map(|m| m.len()) else {
-                return;
-            };
-            if size > MAX_LIST as u64 || combined.saturating_add(size) > MAX_COMBINED {
-                return;
-            }
-            combined += size;
-            if let Ok(text) = fs::read_to_string(path) {
+            let limit = (MAX_LIST as u64).min(MAX_COMBINED.saturating_sub(combined));
+            if let Ok(text) = crate::security::read_profile_text(path, limit) {
+                combined += text.len() as u64;
                 rules += text
                     .lines()
                     .filter(|l| !l.is_empty() && !l.starts_with('!') && !l.starts_with('['))

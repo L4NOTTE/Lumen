@@ -13,6 +13,8 @@ use std::{
 
 const RELEASES: &str = "https://github.com/L4NOTTE/LUMEN-IS-Web-browser/releases";
 const KEY: &[u8; 32] = include_bytes!("../assets/update-public.bin");
+#[cfg(windows)]
+pub const READY_STATUS: &str = "Обновление загружено. Можно перезапустить браузер.";
 const LIMIT: u64 = 64 * 1024 * 1024;
 #[derive(Deserialize)]
 struct Envelope {
@@ -46,7 +48,11 @@ fn version(value: &str) -> Option<[u32; 3]> {
     }
     Some(parsed)
 }
-fn verify_manifest(bytes: &[u8], key: &[u8], now: u64) -> Option<Manifest> {
+fn is_newer(candidate: &str, current: &str) -> bool {
+    matches!((version(candidate), version(current)), (Some(candidate), Some(current)) if candidate > current)
+}
+
+fn authenticate(bytes: &[u8], key: &[u8], now: u64) -> Option<Manifest> {
     if bytes.len() > 16384 {
         return None;
     }
@@ -65,13 +71,10 @@ fn verify_manifest(bytes: &[u8], key: &[u8], now: u64) -> Option<Manifest> {
     }
     Some(manifest)
 }
-#[cfg(any(windows, test))]
-fn authenticate(bytes: &[u8], key: &[u8], current: &str, now: u64) -> Option<Manifest> {
-    let manifest = verify_manifest(bytes, key, now)?;
-    (version(&manifest.version)? > version(current)?).then_some(manifest)
-}
 fn verify_asset(path: &Path, asset: &Asset) -> io::Result<()> {
-    let file = fs::File::open(path)?;
+    verify_open_asset(fs::File::open(path)?, asset)
+}
+fn verify_open_asset(file: fs::File, asset: &Asset) -> io::Result<()> {
     if asset.size == 0 || asset.size > LIMIT || file.metadata()?.len() != asset.size {
         return Err(io::Error::other("update size mismatch"));
     }
@@ -138,7 +141,7 @@ impl UpdateService {
     pub fn request(&self) -> &'static str {
         match self.request.as_ref().map(|sender| sender.try_send(())) {
             Some(Ok(()) | Err(mpsc::TrySendError::Full(()))) => "Проверяем обновления…",
-            Some(Err(mpsc::TrySendError::Disconnected(()))) => "Обновление уже загружено. Закройте браузер для установки.",
+            Some(Err(mpsc::TrySendError::Disconnected(()))) => READY_STATUS,
             None => "Автообновление доступно в установленной версии, в основном обычном окне.",
         }
     }
@@ -171,10 +174,13 @@ pub fn start_with_status(enabled: bool, notify: impl Fn(&'static str) + Send + '
         match check(target.clone()) {
             Ok(Some(update)) => {
                 let _ = send.send(update);
+                #[cfg(windows)]
+                notify(READY_STATUS);
+                #[cfg(not(windows))]
                 notify("Обновление загружено. Закройте браузер для установки.");
                 break;
             }
-            Ok(None) => notify("Установлена новейшая версия."),
+            Ok(None) => notify("У вас установлена последняя версия."),
             Err(message) => notify(message),
         }
         if matches!(commands.recv_timeout(std::time::Duration::from_secs(6 * 60 * 60)), Err(mpsc::RecvTimeoutError::Disconnected)) { break; }
@@ -182,46 +188,40 @@ pub fn start_with_status(enabled: bool, notify: impl Fn(&'static str) + Send + '
     service
 }
 fn check(target: PathBuf) -> Result<Option<Pending>, &'static str> {
-    const LOCAL_ERROR: &str = "Не удалось подготовить файлы обновления.";
-    const MANIFEST_ERROR: &str = "Не удалось подтвердить подлинность или срок действия манифеста.";
-    let previous_modified = fs::metadata(&target)
-        .and_then(|metadata| metadata.modified())
-        .map_err(|_| LOCAL_ERROR)?;
+    let local_error = "Не удалось подготовить проверку обновлений.";
+    let previous_modified = fs::metadata(&target).map_err(|_| local_error)?.modified().map_err(|_| local_error)?;
     let stage = tempfile::Builder::new()
         .prefix("lumen-update-")
         .tempdir()
-        .map_err(|_| LOCAL_ERROR)?;
+        .map_err(|_| local_error)?;
     let feed = stage.path().join("manifest.json");
     if !fetch(
         &format!("{RELEASES}/latest/download/lumen-update.json"),
         &feed,
         16384,
     ) {
-        return Err("Не удалось получить манифест обновления с GitHub Releases.");
+        return Err("Не удалось скачать манифест обновлений с GitHub.");
     }
     let mut bytes = Vec::new();
     fs::File::open(&feed)
-        .map_err(|_| LOCAL_ERROR)?
+        .map_err(|_| local_error)?
         .take(16385)
         .read_to_end(&mut bytes)
-        .map_err(|_| LOCAL_ERROR)?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| LOCAL_ERROR)?.as_secs();
-    let manifest = verify_manifest(&bytes, KEY, now).ok_or(MANIFEST_ERROR)?;
-    let published = version(&manifest.version).ok_or(MANIFEST_ERROR)?;
-    let current = version(env!("CARGO_PKG_VERSION")).ok_or(LOCAL_ERROR)?;
-    if published < current {
-        return Err("Установленная версия новее опубликованной в канале обновлений.");
-    }
-    if published == current {
+        .map_err(|_| local_error)?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| local_error)?.as_secs();
+    let current = env!("CARGO_PKG_VERSION");
+    let manifest = authenticate(&bytes, KEY, now)
+        .ok_or("Манифест обновлений не прошёл проверку подписи, срока действия или версии.")?;
+    if !is_newer(&manifest.version, current) {
         return Ok(None);
     }
     let asset = if cfg!(windows) {
         manifest.windows_x64
     } else {
         manifest.linux_x64
-    }.ok_or("В релизе нет обновления для этой платформы.")?;
+    }.ok_or("В релизе отсутствует обновление для этой платформы.")?;
     if asset.size == 0 || asset.size > LIMIT {
-        return Err("В манифесте указан недопустимый размер файла обновления.");
+        return Err("Некорректный размер обновления в манифесте.");
     }
     let file = stage.path().join(NAME);
     if !fetch(
@@ -229,9 +229,9 @@ fn check(target: PathBuf) -> Result<Option<Pending>, &'static str> {
         &file,
         asset.size,
     ) {
-        return Err("Не удалось скачать файл обновления из релиза GitHub.");
+        return Err("Не удалось скачать файл обновления с GitHub.");
     }
-    verify_asset(&file, &asset).map_err(|_| "Файл обновления не прошёл проверку целостности.")?;
+    verify_asset(&file, &asset).map_err(|_| "Файл обновления не прошёл проверку размера или SHA-256.")?;
     Ok(Some(Pending {
         stage,
         target,
@@ -242,6 +242,15 @@ fn check(target: PathBuf) -> Result<Option<Pending>, &'static str> {
 }
 impl Pending {
     pub fn apply(self) -> io::Result<()> {
+        self.apply_inner(false)
+    }
+
+    #[cfg(windows)]
+    pub fn apply_and_restart(self) -> io::Result<()> {
+        self.apply_inner(true)
+    }
+
+    fn apply_inner(self, #[cfg_attr(not(windows), allow(unused_variables))] restart: bool) -> io::Result<()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(io::Error::other)?
@@ -268,12 +277,14 @@ impl Pending {
                 .duration_since(UNIX_EPOCH)
                 .map_err(io::Error::other)?
                 .as_nanos();
-            std::process::Command::new(helper)
+            let mut command = std::process::Command::new(helper);
+            command
                 .arg("--apply-staged-update")
                 .arg(std::process::id().to_string())
                 .arg(&self.target)
-                .arg(modified.to_string())
-                .spawn()?;
+                .arg(modified.to_string());
+            if restart { command.arg("--restart-browser"); }
+            command.spawn()?;
             let _ = self.stage.keep();
         }
         #[cfg(target_os = "linux")]
@@ -297,8 +308,8 @@ pub fn helper_mode() -> bool {
     if args.get(1).is_none_or(|arg| arg != "--apply-staged-update") {
         return false;
     }
-    if args.len() == 5 {
-        let result = run_helper(&args[2], Path::new(&args[3]), &args[4]);
+    if args.len() == 5 || (args.len() == 6 && args[5] == "--restart-browser") {
+        let result = run_helper(&args[2], Path::new(&args[3]), &args[4], args.len() == 6);
         if let Some(dir) = dirs::data_local_dir().map(|dir| dir.join("Lumen")) {
             let status = match result {
                 Ok(()) => "Update installer completed".to_string(),
@@ -311,7 +322,7 @@ pub fn helper_mode() -> bool {
 }
 
 #[cfg(windows)]
-fn run_helper(pid: &std::ffi::OsStr, target: &Path, modified: &std::ffi::OsStr) -> io::Result<()> {
+fn run_helper(pid: &std::ffi::OsStr, target: &Path, modified: &std::ffi::OsStr, restart: bool) -> io::Result<()> {
     use windows::Win32::{
         Foundation::{CloseHandle, WAIT_OBJECT_0},
         System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_ACCESS_RIGHTS},
@@ -360,8 +371,11 @@ fn run_helper(pid: &std::ffi::OsStr, target: &Path, modified: &std::ffi::OsStr) 
         .duration_since(UNIX_EPOCH)
         .map_err(io::Error::other)?
         .as_secs();
-    let manifest = authenticate(&bytes, KEY, env!("CARGO_PKG_VERSION"), now)
+    let manifest = authenticate(&bytes, KEY, now)
         .ok_or_else(|| io::Error::other("invalid signed update"))?;
+    if !is_newer(&manifest.version, env!("CARGO_PKG_VERSION")) {
+        return Err(io::Error::other("staged installer is not newer than the browser"));
+    }
     let installer = stage.join(NAME);
     // Deny replacement and writes while the verified installer is launched.
     use std::os::windows::fs::OpenOptionsExt;
@@ -369,8 +383,8 @@ fn run_helper(pid: &std::ffi::OsStr, target: &Path, modified: &std::ffi::OsStr) 
         .read(true)
         .share_mode(1)
         .open(&installer)?;
-    verify_asset(
-        &installer,
+    verify_open_asset(
+        _installer_lock.try_clone()?,
         &manifest
             .windows_x64
             .ok_or_else(|| io::Error::other("Windows asset missing"))?,
@@ -392,6 +406,7 @@ fn run_helper(pid: &std::ffi::OsStr, target: &Path, modified: &std::ffi::OsStr) 
     if !result.success() {
         return Err(io::Error::other(format!("installer returned {result}")));
     }
+    if restart { std::process::Command::new(target).arg("--restore-session").spawn()?; }
     Ok(())
 }
 
@@ -402,6 +417,26 @@ mod tests {
         rand::SystemRandom,
         signature::{Ed25519KeyPair, KeyPair},
     };
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Requires access to the public GitHub release channel"]
+    fn public_channel_accepts_signed_release_older_than_local_build() {
+        let target = std::env::current_exe().unwrap();
+        match check(target) {
+            Ok(None) => {}
+            Ok(Some(_)) => panic!("A newer release was published; use the staged update test"),
+            Err(reason) => panic!("{reason}"),
+        }
+    }
+
+    #[test]
+    fn installer_requires_a_strictly_newer_version() {
+        assert!(is_newer("0.4.42", "0.4.41"));
+        assert!(!is_newer("0.4.41", "0.4.41"));
+        assert!(!is_newer("0.4.40", "0.4.41"));
+        assert!(!is_newer("0.4.042", "0.4.41"));
+    }
+
     #[test]
     fn payload_hash_is_verified_after_download() {
         use std::io::Write;
@@ -416,19 +451,20 @@ mod tests {
         assert!(verify_asset(file.path(), &asset).is_err());
     }
     #[test]
-    fn rejects_tampered_expired_and_older_updates() {
+    fn authenticates_signed_manifests_and_rejects_tampering_and_expiry() {
         let pk = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
         let pair = Ed25519KeyPair::from_pkcs8(pk.as_ref()).unwrap();
         let data = br#"{"version":"0.4.9","expires":1000}"#;
         let mut envelope = serde_json::json!({"payload":STANDARD.encode(data),"signature":STANDARD.encode(pair.sign(data).as_ref())});
         let key = pair.public_key().as_ref();
-        assert!(authenticate(envelope.to_string().as_bytes(), key, "0.4.8", 900).is_some());
-        assert!(verify_manifest(envelope.to_string().as_bytes(), key, 900).is_some());
-        assert!(authenticate(envelope.to_string().as_bytes(), key, "0.4.9", 900).is_none());
-        assert!(authenticate(envelope.to_string().as_bytes(), key, "0.4.8", 1000).is_none());
+        let signed = authenticate(envelope.to_string().as_bytes(), key, 900).unwrap();
+        assert!(is_newer(&signed.version, "0.4.8"));
+        assert!(!is_newer(&signed.version, "0.4.9"));
+        assert!(!is_newer(&signed.version, "0.4.10"));
+        assert!(authenticate(envelope.to_string().as_bytes(), key, 1000).is_none());
         envelope["payload"] = STANDARD
             .encode(br#"{"version":"9.0.0","expires":1000}"#)
             .into();
-        assert!(authenticate(envelope.to_string().as_bytes(), key, "0.4.8", 900).is_none());
+        assert!(authenticate(envelope.to_string().as_bytes(), key, 900).is_none());
     }
 }

@@ -35,14 +35,16 @@ impl Blocker {
         let mut css = String::from(DEFAULT_CSS);
 
         if let Ok(rd) = fs::read_dir(dir) {
-            for entry in rd.flatten() {
+            let mut remaining = 8 * 1024 * 1024;
+            for entry in rd.flatten().take(128) {
                 let p = entry.path();
                 if p.extension().and_then(|x| x.to_str()) != Some("txt") {
                     continue;
                 }
-                let Ok(text) = fs::read_to_string(&p) else {
+                let Ok(text) = crate::security::read_profile_text(&p, remaining.min(1024 * 1024)) else {
                     continue;
                 };
+                remaining -= text.len() as u64;
                 for line in text.lines() {
                     parse_line(line.trim(), &mut hosts, &mut css);
                 }
@@ -70,12 +72,16 @@ impl Blocker {
     }
 
     pub fn is_blocked(&self, url: &str) -> bool {
+        if let Some(host) = simple_http_host(url) {
+            return self.is_host_blocked(host);
+        }
         let Ok(u) = url::Url::parse(url) else {
             return false;
         };
-        let Some(mut h) = u.host_str() else {
-            return false;
-        };
+        u.host_str().is_some_and(|host| self.is_host_blocked(host))
+    }
+
+    pub fn is_host_blocked(&self, mut h: &str) -> bool {
         loop {
             if self.hosts.contains(h) {
                 return true;
@@ -86,6 +92,19 @@ impl Blocker {
             }
         }
     }
+}
+
+fn simple_http_host(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next()?;
+    // Keep URL canonicalization for IDNA, ports, credentials, unusual syntax and IPv4.
+    if !host.bytes().all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-')) {
+        return None;
+    }
+    let last = host.rsplit('.').next()?;
+    last.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+        .then_some(host)
+        .filter(|host| !host.split('.').any(|label| label.starts_with("xn--")))
 }
 
 fn parse_line(l: &str, hosts: &mut HashSet<String>, css: &mut String) {
@@ -124,6 +143,28 @@ fn parse_line(l: &str, hosts: &mut HashSet<String>, css: &mut String) {
 
 #[cfg(test)]
 mod yandex_tests {
+    #[test]
+    fn fast_host_matches_url_parser() {
+        let blocker = super::Blocker::load(std::path::Path::new("__no_custom_filters__"));
+        for url in [
+            "https://a.doubleclick.net/path?q=1#top", "http://doubleclick.net?x",
+            "https://doubleclick.net.evil.test/", "https://DOUBLECLICK.NET/",
+            "https://example.test@doubleclick.net:443/", "https://doubleclick.net@example.test/",
+            "https://doubleclick%2enet/", "https://doubleclick.net\\path",
+            "http://127.1/a", "http://0x7f000001/", "http://[::1]/", "http://example.123/",
+            "https://xn--e1afmkfd.xn--p1ai/", "https://пример.рф/", "https:///doubleclick.net/",
+            "https://doubleclick.net./", "https://extra..doubleclick.net/",
+            "https://", "data:text/plain,https://doubleclick.net",
+        ] {
+            let parsed = url::Url::parse(url).ok();
+            let host = parsed.as_ref().and_then(|url| url.host_str());
+            if let Some(fast) = super::simple_http_host(url) {
+                assert_eq!(Some(fast), host, "{url}");
+            }
+            assert_eq!(blocker.is_blocked(url), host.is_some_and(|host| blocker.is_host_blocked(host)), "{url}");
+        }
+    }
+
     #[test]
     fn ads_are_blocked_without_blocking_weather_or_static_assets() {
         let blocker = super::Blocker::load(std::path::Path::new("__no_custom_filters__"));
