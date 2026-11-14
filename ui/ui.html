@@ -7,14 +7,14 @@
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.001ms !important; transition-duration:.001ms !important; } }
   :root { --acc-l:#4f46e5; --acc-d:#8b8dff; --font:'Segoe UI Variable','Segoe UI',system-ui,sans-serif; --fs:13px;
           --bg:#f3f4f6; --bar:#fff; --fg:#1f2328; --mute:#6b7280; --line:#e5e7eb; --acc:var(--acc-l); --hover:#e8eaee;
-          --ease:cubic-bezier(.2,.8,.2,1); }
+          --ease:cubic-bezier(.2,.8,.2,1); color-scheme:light; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#1b1c20; --bar:#25262b; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:var(--acc-d); --hover:#2f3137; }
+    :root { --bg:#1b1c20; --bar:#25262b; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:var(--acc-d); --hover:#2f3137; color-scheme:dark; }
   }
-  [data-theme="light"] { --bg:#f3f4f6; --bar:#fff; --fg:#1f2328; --mute:#6b7280; --line:#e5e7eb; --acc:var(--acc-l); --hover:#e8eaee; }
-  [data-theme="dark"]  { --bg:#1b1c20; --bar:#25262b; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:var(--acc-d); --hover:#2f3137; }
+  [data-theme="light"] { --bg:#f3f4f6; --bar:#fff; --fg:#1f2328; --mute:#6b7280; --line:#e5e7eb; --acc:var(--acc-l); --hover:#e8eaee; color-scheme:light; }
+  [data-theme="dark"]  { --bg:#1b1c20; --bar:#25262b; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:var(--acc-d); --hover:#2f3137; color-scheme:dark; }
   /* режим инкогнито: фиолетовая тема, всегда тёмная */
-  body.inc { --bg:#160f24; --bar:#21173a; --fg:#ece6f7; --mute:#a99bc4; --line:#3a2d52; --acc:#b794f6; --hover:#2d2148; }
+  body.inc { --bg:#160f24; --bar:#21173a; --fg:#ece6f7; --mute:#a99bc4; --line:#3a2d52; --acc:#b794f6; --hover:#2d2148; color-scheme:dark; }
 
   [hidden] { display:none !important; }
   * { box-sizing:border-box; margin:0; user-select:none; }
@@ -93,10 +93,28 @@
 
   /* панели: история и настройки */
   #panel { position:fixed; left:0; right:0; top:80px; bottom:0; overflow:auto; background:var(--bg); animation:panelIn .26s var(--ease) both; }
+  #panel, #favoriteslist { scrollbar-width:thin; scrollbar-color:color-mix(in srgb,var(--mute) 58%,var(--bar)) transparent; }
   .pin { max-width:780px; margin:0 auto; padding:22px 26px 40px; }
   .ph { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
   .ph h2 { font-size:1.6em; font-weight:600; }
   h3 { font-size:.85em; font-weight:600; color:var(--mute); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; }
+  .grp.developer-card { background:linear-gradient(120deg,color-mix(in srgb,var(--acc) 8%,var(--bar)),var(--bar) 68%); }
+  .developer-row { display:flex; align-items:center; flex-wrap:wrap; gap:14px; }
+  .developer-avatar { width:48px; height:48px; border-radius:14px; border:1px solid var(--line); }
+  .developer-info { flex:1 1 130px; display:grid; gap:6px; min-width:0; }
+  .developer-info strong { font-size:1.35em; font-weight:650; }
+  .developer-info span { color:var(--mute); line-height:1.3; }
+  .developer-links { display:flex; flex-wrap:wrap; gap:8px; }
+  .developer-links .chip:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+  .developer-support { display:flex; align-items:center; flex-wrap:wrap; gap:12px;
+    margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+  .support-icon { display:grid; place-items:center; flex:none; width:36px; height:36px; border-radius:10px;
+    background:color-mix(in srgb,var(--acc) 13%,var(--bar)); color:var(--acc); }
+  .support-copy { flex:1 1 175px; display:grid; gap:4px; line-height:1.4; }
+  .support-copy span { color:var(--mute); }
+  .support-links { display:flex; flex-wrap:wrap; gap:8px; }
+  .support-links .chip { border-color:color-mix(in srgb,var(--acc) 45%,var(--line)); }
+  .support-links .chip:hover { background:color-mix(in srgb,var(--acc) 12%,var(--bar)); }
   .grp { background:var(--bar); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
   .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
   .seg, .segx { display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
@@ -113,6 +131,12 @@
   .erow b { flex:1; font-weight:500; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   a.lnk { color:var(--acc); cursor:pointer; text-decoration:underline; }
 
+  #p-settings { padding-bottom:48px; }
+  #p-settings .grp { padding-block:20px; margin-bottom:16px; }
+  #p-settings .grp > h3 { margin-bottom:13px; }
+  #updategrp { margin-top:10px; }
+  #p-settings .accent-label { margin:18px 0 10px; }
+  #pick, #unpick { margin-top:4px; }
   .accent-label { display:block; margin:14px 0 7px; color:var(--mute); }
   .accent-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
   .accent-controls input[type=color] { width:44px; height:36px; padding:4px; border:1px solid var(--line); border-radius:9px; background:var(--bg); cursor:pointer; }
@@ -146,6 +170,14 @@
   .hrow .tt i { display:block; font-style:normal; color:var(--mute); font-size:.88em; margin-top:3px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .hrow .x { opacity:0; }
   .hrow:hover .x { opacity:1; }
+  .favorite-link { text-align:left; padding:0; border:0; background:none; color:inherit; cursor:pointer; }
+  .favorite-link { display:flex; align-items:center; gap:10px; }
+  .favorite-label { flex:1; min-width:0; }
+  .favorite-icon { position:relative; display:grid; place-items:center; flex:none; width:30px; height:30px;
+    border-radius:8px; overflow:hidden; color:#fff; font-weight:600; }
+  .favorite-icon img { position:absolute; inset:0; width:100%; height:100%; padding:5px; object-fit:scale-down; background:#fff; }
+  .hrow .favorite-remove { opacity:1; flex:none; color:var(--mute); width:26px; height:26px; }
+  .hrow .favorite-remove:hover, .hrow .favorite-remove:focus-visible { color:var(--fg); background:var(--bar); }
   .empty { text-align:center; color:var(--mute); padding:50px 0; }
 
   @keyframes tabIn  { from { opacity:0; transform:translateY(6px) scale(.96); } to { opacity:1; transform:none; } }
@@ -173,6 +205,16 @@
   @media(max-width:720px) { #engine,#star { display:none; } #nav{gap:2px;padding:0 5px}.btn{width:27px} .tab{min-width:52px} #logo{margin-right:3px} .tb{width:25px}.wc button{width:32px} }
   @media(max-width:540px) { #inc { display:none; } .tab{min-width:44px;padding-left:6px} .grp{padding:12px} .chip{padding:7px 9px} }
   @media(max-height:500px) { .pin { padding-top:12px; } .ph{margin-bottom:10px} }
+  #panel.favorites-popup {
+    left:auto; right:24px; top:90px; bottom:auto;
+    width:min(390px, calc(100vw - 36px)); height:min(500px, calc(100vh - 102px));
+    background:var(--bar); border:1px solid var(--line); border-radius:8px;
+    animation:none; overflow:hidden;
+  }
+  #p-favorites { height:100%; display:flex; flex-direction:column; padding:12px; }
+  #p-favorites .ph { flex:none; margin:0 0 6px; padding:0 2px 8px; border-bottom:1px solid var(--line); }
+  #p-favorites .ph h2 { font-size:1.2em; }
+  #favoriteslist { min-height:0; overflow:auto; overscroll-behavior:contain; padding-right:4px; }
 </style>
 <style>
 button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outline-offset:-3px}
@@ -207,6 +249,7 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
     <div id="badge" title="История, куки и кэш не сохраняются">🕶 Инкогнито</div>
     <button class="btn tb" id="downloadsbtn" title="Загрузки (Ctrl+J)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span id="dlbadge" hidden></span></button>
     <button class="btn tb" id="hist" title="История (Ctrl+H)">🕒</button>
+    <button class="btn tb" id="favoritesbtn" title="Избранное" hidden><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M6 4h12v16l-6-4-6 4z"/></svg></button>
     <button class="btn tb" id="extbtn" title="Расширения">🧩</button>
     <button class="btn tb" id="inc" title="Окно инкогнито (Ctrl+Shift+N)">🕶</button>
     <button class="btn tb" id="shield" title="Блокировка рекламы">🛡</button>
@@ -237,6 +280,10 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
   <div id="toast"></div>
 
   <div id="panel" hidden>
+    <div class="pin" id="p-favorites" hidden>
+      <div class="ph"><h2>Избранное</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
+      <div id="favoriteslist"></div>
+    </div>
     <div class="pin" id="p-downloads" hidden>
       <div class="ph"><h2>Загрузки</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
       <div class="row" style="margin-bottom:16px"><input class="inp" id="dlq" placeholder="Найти файл" autocomplete="off" spellcheck="false"><button class="chip" id="dlopenfolder">Папка загрузок</button><button class="chip" id="dlclear">Очистить список</button></div>
@@ -276,9 +323,29 @@ html[data-platform="linux"] .grp:has(.segx[data-x="eco"]){display:none!important
         <div class="hint">Открыть системные настройки для ссылок HTTP и HTTPS. Выбор подтверждается в Windows.</div>
       </div>
 
-      <div class="grp" id="updategrp" hidden><h3>Обновления</h3>
+      <div class="grp"><h3>Обновления</h3>
+        <p class="hint" id="installedversion"></p>
+        <div id="updategrp" hidden>
         <button class="chip" id="checkupdate">Проверить обновления</button>
-        <div class="hint" id="updatestatus" role="status"></div>
+          <button class="chip" id="applyupdate" hidden>Перезапустить и обновить</button>
+          <div class="hint" id="updatestatus" role="status"></div>
+        </div>
+      </div>
+
+      <div class="grp developer-card"><h3>О разработчике</h3>
+        <div class="developer-row">
+          <img class="developer-avatar" src="data:image/png;base64,__DEVELOPER_AVATAR__" width="48" height="48" alt="">
+          <div class="developer-info"><strong>L4NOTTE</strong><span>Разработчик Lumen · Ижевск</span></div>
+          <div class="developer-links">
+            <button class="chip" id="developerprofile">Профиль на GitHub ↗</button>
+            <button class="chip" id="developerrepo">Исходный код ↗</button>
+          </div>
+        </div>
+        <div class="developer-support">
+          <span class="support-icon" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 20s-8-4.7-8-10a4.5 4.5 0 0 1 8-2.9A4.5 4.5 0 0 1 20 10c0 5.3-8 10-8 10Z"/></svg></span>
+          <div class="support-copy"><strong>Поддержать Lumen</strong><span>Ссылки для донатов появятся здесь.</span></div>
+          <div class="support-links" id="supportlinks" hidden></div>
+        </div>
       </div>
 
       <div class="grp"><h3>Тема</h3>
@@ -391,7 +458,7 @@ frameMedia.addEventListener('change',syncFrameTheme);
 let hist = [];
 let lastPanel = '';
 let lastSettingsState = '';
-let justDragged = false, activeTabDrag = null, pendingTabOrder = null;
+let activeTabDrag = null, pendingTabOrder = null;
 const pendingDetaches = new Map();
 window.resetTabDrag = () => {
   activeTabDrag?.();
@@ -408,7 +475,7 @@ const els = new Map(); // id -> элемент вкладки (обновляе�
 const tabParts = new WeakMap();
 const tabIcons = new Map(); // only icons referenced by the current tabs
 window.onTabIcon = (key,data) => {
-  if(typeof key==='string'&&/^[a-f0-9]{64}$/.test(key)&&typeof data==='string'&&data.length<=12000&&data.startsWith('data:image/png;base64,'))tabIcons.set(key,data);
+  if(typeof key==='string'&&/^[a-f0-9]{64}$/.test(key)&&typeof data==='string'&&data.length<=13678&&data.startsWith('data:image/png;base64,'))tabIcons.set(key,data);
 };
 
 const ACC = { indigo:'#4f46e5', blue:'#2563eb', green:'#16a34a', orange:'#ea580c', pink:'#db2777', red:'#dc2626' };
@@ -480,26 +547,37 @@ function makeTab(t) {
   const label = document.createElement('span');
   const x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
   x.onclick = (e) => { e.stopPropagation(); send({ cmd: 'close_tab', id: t.id }); };
-  d.onclick = () => { if (!justDragged) send({ cmd: 'switch', id: t.id }); };
+  d.onclick = e => { if (e.detail === 0) send({ cmd: 'switch', id: t.id }); };
   d.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || e.target.closest('.x')) return;
     activeTabDrag?.();
+    if (pendingDetaches.size) return;
     const tabs = [...d.parentElement.querySelectorAll('.tab:not(.out)')];
-    for (const el of tabs) { el.getAnimations().forEach(a => a.finish()); el.classList.remove('entering'); }
-    const slots = tabs.map(el => el.getBoundingClientRect());
     const startIndex = tabs.indexOf(d);
     const others = tabs.flatMap((el, slot) => el === d ? [] : [{el, slot}]);
-    const centers = others.map(({slot}) => slots[slot].left + slots[slot].width / 2);
+    let strip, slots, centers;
     const sx = e.clientX, sy = e.clientY;
-    const canDetach = !state.incognito && (tabs.length > 1 || state.detached);
+    const canDetach = !state.incognito;
     let moved = false, frame = 0, px = sx, py = sy, index = startIndex, detached = false;
     try { d.setPointerCapture(e.pointerId); } catch (_) { return; }
     const preview = () => {
       frame = 0;
       const dx = px - sx, dy = py - sy;
       if (!moved && Math.hypot(dx, dy) < 8) return;
-      if (!moved) { moved = true; d.classList.add('drag'); }
-      const far = canDetach && (Math.abs(dy) > 46 || px < 0 || px > innerWidth);
+      if (!moved) {
+        moved = true;
+        for (const el of tabs) {
+          el.getAnimations().forEach(animation => animation.finish());
+          el.classList.remove('entering');
+        }
+        strip = $('tabs').getBoundingClientRect();
+        slots = tabs.map(el => el.getBoundingClientRect());
+        centers = others.map(({slot}) => slots[slot].left + slots[slot].width / 2);
+        d.classList.add('drag');
+      }
+      const margin = state.detached ? 0 : 24;
+      const far = canDetach && (py < strip.top - margin || py >= strip.bottom + margin
+        || px < strip.left - margin || px >= strip.right + margin);
       if (far !== detached) {
         d.classList.toggle('detach', far);
         detached = far;
@@ -535,8 +613,10 @@ function makeTab(t) {
       px = ev.clientX; py = ev.clientY; cancelAnimationFrame(frame); preview();
       const detach = detached;
       clean();
-      if (!moved) return;
-      justDragged = true; setTimeout(() => { justDragged = false; }, 100);
+      if (!moved) {
+        send({ cmd: 'switch', id: t.id });
+        return;
+      }
       const order = others.map(({el}) => el); order.splice(index, 0, d);
       if (!detach) pendingTabOrder = {ids:order.map(el=>+el.dataset.id),until:performance.now()+1500};
       if (detach) {
@@ -553,7 +633,12 @@ function makeTab(t) {
     d.addEventListener('pointercancel', cancel); d.addEventListener('lostpointercapture', cancel);
     addEventListener('resize', cancel, {once:true});
   });
-  d.onauxclick = (e) => { if (e.button === 1) send({ cmd: 'close_tab', id: t.id }); };
+  d.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
+  d.onauxclick = e => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    send({ cmd: 'close_tab', id: t.id });
+  };
   d.append(icon, label, x);
   tabParts.set(d, {img, home, globe, label});
   return d;
@@ -643,6 +728,12 @@ window.onHistory = (list) => { hist = list; renderHist(); };
 
 // ---------- состояние ----------
 window.onState = (s) => {
+  const favoritesAvailable = (s.platform || 'windows') === 'windows' && !s.incognito;
+  $('favoritesbtn').hidden = !favoritesAvailable;
+  if (favoritesAvailable && $('star').getAttribute('data-hint') !== 'Добавить в избранное (Ctrl+D)') {
+    $('star').setAttribute('data-hint', 'Добавить в избранное (Ctrl+D)');
+    $('star').setAttribute('aria-label', 'Добавить в избранное (Ctrl+D)');
+  }
   document.documentElement.dataset.platform = s.platform || 'windows';
   $('updategrp').hidden = s.platform === 'linux' || !!s.incognito;
   $('defaultbrowser').textContent = s.platform === 'linux' ? 'Сделать Lumen браузером по умолчанию…' : 'Выбрать Lumen в Windows…';
@@ -650,7 +741,10 @@ window.onState = (s) => {
   const previous = state;
   state = s;
   document.body.classList.toggle('maximized',s.maximized);
-  if (previous.version !== s.version) $('logo').title = 'Lumen ' + s.version;
+  if (s.version && previous.version !== s.version) {
+    $('logo').title = 'Lumen ' + s.version;
+    $('installedversion').textContent = 'Установлена версия ' + s.version;
+  }
   syncFrameTheme();
   const root = document.documentElement;
   if (previous.set.theme !== s.set.theme) root.dataset.theme = s.set.theme || 'system';
@@ -675,9 +769,19 @@ window.onState = (s) => {
       setTimeout(() => el.remove(), 170);
     }
   }
+  const oldTabs = new Map(previous.tabs.map(t => [t.id, t]));
   for (const t of s.tabs) {
     let el = els.get(t.id);
-    if (!el) { el = makeTab(t); els.set(t.id, el); box.append(el); }
+    const old = oldTabs.get(t.id);
+    if (!el) {
+      el = makeTab(t);
+      els.set(t.id, el);
+      box.append(el);
+    } else if (old && old.title === t.title && old.url === t.url && old.icon === t.icon &&
+        old.loading === t.loading && old.sleeping === t.sleeping &&
+        (previous.active === t.id) === (s.active === t.id)) {
+      continue;
+    }
     el.classList.toggle('on', t.id === s.active);
     el.classList.toggle('sleep', !!t.sleeping);
     el.classList.toggle('loading', !!t.loading);
@@ -717,9 +821,12 @@ window.onState = (s) => {
 
   // панели
   $('panel').hidden = !s.panel || s.panel === 'dev';
+  $('panel').classList.toggle('favorites-popup', s.panel === 'favorites');
   $('devbtn').hidden = !!s.incognito;
   $('devbtn').classList.toggle('on', !!s.dev_open);
-  for (const n of ['history', 'settings', 'ext', 'downloads']) $('p-' + n).hidden = s.panel !== n;
+  for (const n of ['history', 'settings', 'ext', 'downloads', 'favorites']) $('p-' + n).hidden = s.panel !== n;
+  $('favoritesbtn').classList.toggle('on', s.panel === 'favorites');
+  if (previous.panel === 'favorites' && s.panel !== 'favorites') $('favoriteslist').replaceChildren();
   $('zreset').textContent = (s.zoom || 100) + '%';
   $('hist').classList.toggle('on', s.panel === 'history');
   $('downloadsbtn').classList.toggle('on', s.panel === 'downloads');
@@ -786,9 +893,9 @@ function renderDownloads() {
       body.append(name,path,bar,meta);el.append(icon,body,actions);entry={el,name,path,bar,meta,buttons,key:''};downloadNodes.set(r.id,entry);list.append(el);
     }
     const key=JSON.stringify(r);if(entry.key!==key){entry.key=key;entry.name.textContent=r.name;entry.path.textContent=r.path;
-      const progress=r.total>0?Math.min(100,Math.round(r.received/r.total*100)):null;
+      const progress=r.total>0?Math.min(100,Math.floor(r.received/r.total*100)):null;
       entry.bar.hidden=r.status!=='running';if(progress===null)entry.bar.removeAttribute('value');else entry.bar.value=progress;
-      entry.meta.textContent=(names[r.status]||r.status)+' · '+downloadBytes(r.received)+(r.total?' / '+downloadBytes(r.total):'')+(progress!==null&&r.status==='running'?' · '+progress+'%':'')+(r.error?' · '+r.error:'');entry.meta.classList.toggle('dl-error',r.status==='failed');
+      entry.meta.textContent=(r.status==='running'&&r.total>0&&r.received>=r.total?'Ожидание сохранения файла':names[r.status]||r.status)+' · '+downloadBytes(r.received)+(r.total?' / '+downloadBytes(r.total):'')+(progress!==null&&r.status==='running'?' · '+progress+'%':'')+(r.error?' · '+r.error:'');entry.meta.classList.toggle('dl-error',r.status==='failed');
       entry.buttons.open.hidden=r.status!=='completed';entry.buttons.cancel.hidden=r.status!=='running';entry.buttons.remove.hidden=r.status==='running';
     }
   }
@@ -837,11 +944,81 @@ $('inc').onclick = () => send({ cmd: 'incognito' });
 $('shield').onclick = () => send({ cmd: 'toggle_adblock' });
 $('adb').onclick = () => send({ cmd: 'toggle_adblock' });
 const togglePanel = (name) => send(state.panel === name ? { cmd: 'close_panel' } : { cmd: 'open_panel', name });
+$('favoritesbtn').onclick = () => togglePanel('favorites');
+window.onFavorites = (rows) => {
+  const box = $('favoriteslist');
+  const scrollTop = box.scrollTop;
+  box.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Нажмите звезду рядом с адресом, чтобы сохранить страницу.';
+    box.append(empty);
+    return;
+  }
+  for (const {t, u, icon} of rows) {
+    const row = document.createElement('div');
+    row.className = 'hrow';
+    const open = document.createElement('button');
+    open.className = 'tt favorite-link';
+    const host = new URL(u).hostname.replace(/^www\./, '');
+    let hue = 0;
+    for (const letter of host) hue = (hue * 31 + letter.charCodeAt(0)) % 360;
+    const mark = document.createElement('span');
+    mark.className = 'favorite-icon';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.style.background = `linear-gradient(135deg,hsl(${hue},62%,52%),hsl(${(hue + 40) % 360},62%,42%))`;
+    mark.textContent = (t || host || '?').trim().charAt(0).toUpperCase();
+    if (typeof icon === 'string') {
+      const image = document.createElement('img');
+      image.alt = '';
+      image.decoding = 'async';
+      image.loading = 'lazy';
+      image.onerror = () => image.remove();
+      image.src = icon;
+      mark.append(image);
+    }
+    const label = document.createElement('span');
+    label.className = 'favorite-label';
+    const title = document.createElement('b');
+    title.textContent = t || u;
+    const address = document.createElement('i');
+    address.textContent = u;
+    label.append(title, address);
+    open.append(mark, label);
+    open.onclick = () => send({ cmd: 'open_favorite', url: u });
+    const remove = document.createElement('button');
+    remove.className = 'x favorite-remove';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', 'Удалить из избранного');
+    remove.onclick = () => send({ cmd: 'remove_favorite', url: u });
+    row.append(open, remove);
+    box.append(row);
+  }
+  box.scrollTop = scrollTop;
+};
 $('hist').onclick = () => togglePanel('history');
 $('downloadsbtn').onclick = () => togglePanel('downloads');
 $('extbtn').onclick = () => togglePanel('ext');
 document.querySelectorAll('.segx[data-x="level"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_adblock_level', level: b.dataset.v }));
-window.onUpdateStatus = message => { $('updatestatus').textContent = message; };
+$('applyupdate').onclick = () => send({cmd:'apply_update'});
+window.onUpdateStatus = (message, ready) => {
+  $('updatestatus').textContent = message;
+  if (typeof ready === 'boolean') $('applyupdate').hidden = !ready;
+};
+$('developerprofile').onclick = () => send({cmd:'go',text:'https://github.com/L4NOTTE'});
+$('developerrepo').onclick = () => send({cmd:'go',text:'https://github.com/L4NOTTE/Lumen'});
+const supportLinks = [];
+for (const {label, url} of supportLinks) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'chip';
+  button.textContent = label + ' ↗';
+  button.onclick = () => send({cmd:'go',text:url});
+  $('supportlinks').append(button);
+}
+$('supportlinks').hidden = !$('supportlinks').childElementCount;
+if (!$('supportlinks').hidden) document.querySelector('.support-copy span').hidden = true;
 $('checkupdate').onclick = () => send({cmd:'check_update'});
 $('updf').onclick = () => send({ cmd: 'update_filters' });
 $('star').onclick = () => send({ cmd: 'add_current_link' });

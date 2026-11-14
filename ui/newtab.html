@@ -45,7 +45,7 @@
   [data-bg="1"] .tile:hover { background:rgba(255,255,255,.18); }
   .ic { position:relative; width:56px; height:56px; border-radius:15px; display:grid; place-items:center; overflow:hidden;
     color:#fff; font-size:1.6em; font-weight:600; box-shadow:0 2px 10px rgba(0,0,0,.18); }
-  .ic img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#fff; padding:9px; }
+  .ic img { position:absolute; inset:0; width:100%; height:100%; object-fit:scale-down; background:#fff; padding:9px; }
   .nm { max-width:88px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; text-shadow:0 1px 6px rgba(0,0,0,.25); }
   .add .ic { background:color-mix(in srgb, var(--fg) 14%, transparent); color:var(--fg); box-shadow:none; font-size:1.9em; font-weight:300; }
   [data-bg="1"] .add .ic { background:rgba(255,255,255,.2); }
@@ -108,6 +108,21 @@
   const cmd = (path, params) => { location.href = 'https://lumen.invalid/' + path + '?' + new URLSearchParams({...params, nonce: token}).toString(); };
   const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
   const tiles = document.getElementById('tiles');
+  const tileIcons = new Map();
+  function setTileIcon(tile, source) {
+    tile.querySelector('img')?.remove();
+    if (typeof source !== 'string' || !/^data:image\/png;base64,[A-Za-z0-9+/=]{1,13656}$/.test(source)) return;
+    const image = document.createElement('img');
+    image.alt = '';
+    image.decoding = 'async';
+    image.loading = 'lazy';
+    image.onerror = () => image.remove();
+    image.src = source;
+    tile.append(image);
+  }
+  window.updateLinkIcons = icons => {
+    for (const [id, tile] of tileIcons) setTileIcon(tile, icons[id]);
+  };
   if (!INC) {
     LINKS.forEach((l, i) => {
       let host = '';
@@ -117,6 +132,8 @@
       const ic = document.createElement('span'); ic.className = 'ic';
       ic.style.background = `linear-gradient(135deg,hsl(${hue(host)},62%,52%),hsl(${(hue(host) + 40) % 360},62%,42%))`;
       ic.textContent = (l.t || host || '?').trim().charAt(0).toUpperCase();
+      tileIcons.set(l.i ?? i, ic);
+      setTileIcon(ic, l.icon);
       const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = l.t || host;
       const del = document.createElement('button'); del.className = 'del'; del.type = 'button'; del.textContent = '✕'; del.title = 'Удалить';
       del.onclick = (e) => { e.preventDefault(); e.stopPropagation(); cmd('del', { i: l.i ?? i }); };

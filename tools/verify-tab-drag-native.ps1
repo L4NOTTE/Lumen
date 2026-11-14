@@ -91,7 +91,7 @@ try {
     $handle=$main.Current.NativeWindowHandle
     Drag $page ($rect.X+180) ($rect.Y+130) $main
     $detachTimer=[Diagnostics.Stopwatch]::StartNew();
-    $detachedHandle=Wait-Until {[LumenDragProbe]::Windows($app.Id) | Where-Object {$_ -ne [intptr]$handle -and [LumenDragProbe]::Title($_) -eq 'Lumen performance fixture'} | Select-Object -First 1}
+    $detachedHandle=Wait-Until {[LumenDragProbe]::Windows($app.Id) | Where-Object {$_ -ne [intptr]$handle -and [LumenDragProbe]::Title($_) -like 'Lumen * — Lumen performance fixture'} | Select-Object -First 1}
     $detachMs=$detachTimer.Elapsed.TotalMilliseconds
     $detached=[Windows.Automation.AutomationElement]::FromHandle($detachedHandle)
     $tab=Wait-Until {Elements $detached | Where-Object {$_.Current.Name -eq 'Lumen performance fixture' -and $_.Current.BoundingRectangle.Height -lt 65 -and $_.Current.BoundingRectangle.Y -lt ($detached.Current.BoundingRectangle.Y + 70)} | Select-Object -First 1}

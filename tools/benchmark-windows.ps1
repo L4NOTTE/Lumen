@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [int]$Runs = 3,
     [int]$TabCycles = 0,
+    [ValidateRange(2, 100)][int]$Tabs = 11,
     [switch]$NavigateTabs,
     [switch]$TrackSession,
     [int]$CyclePauseSeconds = 3,
@@ -64,6 +65,7 @@ function Measure-Family([int]$ProcessId) {
         processes = $processes.Count
         privateMiB = [math]::Round(($processes | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB, 1)
         workingSetMiB = [math]::Round(($processes | Measure-Object WorkingSet64 -Sum).Sum / 1MB, 1)
+        cpuByProcess = @{} + ($processes | ForEach-Object -Begin { $ticks = @{} } -Process { $ticks["$($_.Id):$($_.StartTime.ToUniversalTime().Ticks)"] = $_.CPU } -End { $ticks })
         threads = ($processes | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum
     }
 }
@@ -105,7 +107,7 @@ function Measure-TabCycles($Browser, [int]$Cycles, [string]$ReadyFile, [string]$
         [Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Hyperlink)
     $pageCount = 12
     $result = for ($cycle = 1; $cycle -le $Cycles; $cycle++) {
-        for ($n = 1; $n -le 10; $n++) {
+        for ($n = 1; $n -lt $Tabs; $n++) {
             $expected = $n + 1
             $add.GetCurrentPattern($invoke).Invoke()
             if (-not (Wait-Until { $tree.FindAll($scope, $tabClose).Count -ge $expected } 6000)) { throw "Tab open timed out" }
@@ -125,13 +127,13 @@ function Measure-TabCycles($Browser, [int]$Cycles, [string]$ReadyFile, [string]$
             }
         }
         $peak = Measure-Family $Browser.Id
-        for ($n = 10; $n -ge 1; $n--) {
+        for ($n = $Tabs - 1; $n -ge 1; $n--) {
             $tabs = $tree.FindAll($scope, $tabClose)
             $tabs[$tabs.Count - 1].GetCurrentPattern($invoke).Invoke()
             if (-not (Wait-Until { $tree.FindAll($scope, $tabClose).Count -eq $n } 6000)) { throw "Tab close timed out" }
         }
         Start-Sleep -Seconds $CyclePauseSeconds
-        $row = @{ cycle = $cycle; peak = $peak; afterClose = Measure-Family $Browser.Id }
+        $row = @{ cycle = $cycle; tabs = $Tabs; peak = $peak; afterClose = Measure-Family $Browser.Id }
         $row | ConvertTo-Json -Depth 8 -Compress | Add-Content -LiteralPath $SamplesFile
         $row
     }
@@ -184,6 +186,16 @@ $rows = foreach ($run in 1..$Runs) {
                 Measure-Family $browser.Id
             })
         } else { @() }
+        $idleCpu = $null
+        if ($idleTimeline.Count -gt 0) {
+            $last = @($idleTimeline)[-1]
+            $seconds = ([DateTimeOffset]::Parse($last.timestamp) - [DateTimeOffset]::Parse($idle.timestamp)).TotalSeconds
+            $used = 0.0
+            foreach ($key in $idle.cpuByProcess.Keys) {
+                if ($last.cpuByProcess.ContainsKey($key)) { $used += $last.cpuByProcess[$key] - $idle.cpuByProcess[$key] }
+            }
+            $idleCpu = [math]::Round(100 * $used / $seconds, 3)
+        }
         $observed = @($busy.identities + $idle.identities + @($cycles | ForEach-Object { $_.peak.identities + $_.afterClose.identities }) + @($idleTimeline | ForEach-Object identities) | Sort-Object -Unique)
         $timer = [Diagnostics.Stopwatch]::StartNew()
         $browser.Refresh()
@@ -203,6 +215,7 @@ $rows = foreach ($run in 1..$Runs) {
             idle = $idle
             tabCycles = $cycles
             idleTimeline = $idleTimeline
+            idleCpuPercentOfOneCore = $idleCpu
             observedSurvivors = (Count-Survivors $observed)
             exited = $exited
         }
