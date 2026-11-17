@@ -1,0 +1,1425 @@
+<!doctype html>
+<html lang="ru" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<style>
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.001ms !important; transition-duration:.001ms !important; } }
+  :root { --acc-l:#4f46e5; --acc-d:#8b8dff; --font:'Segoe UI Variable','Segoe UI',system-ui,sans-serif; --fs:13px;
+          --bg:#f3f4f6; --bar:#fff; --fg:#1f2328; --mute:#6b7280; --line:#e5e7eb; --acc:var(--acc-l); --hover:#e8eaee;
+          --ease:cubic-bezier(.2,.8,.2,1); color-scheme:light; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1b1c20; --bar:#25262b; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:var(--acc-d); --hover:#2f3137; color-scheme:dark; }
+  }
+  [data-theme="light"] { --bg:#f3f4f6; --bar:#fff; --fg:#1f2328; --mute:#6b7280; --line:#e5e7eb; --acc:var(--acc-l); --hover:#e8eaee; color-scheme:light; }
+  [data-theme="dark"]  { --bg:#1b1c20; --bar:#25262b; --fg:#e6e7ea; --mute:#9aa0a6; --line:#33353b; --acc:var(--acc-d); --hover:#2f3137; color-scheme:dark; }
+  /* режим инкогнито: фиолетовая тема, всегда тёмная */
+  body.inc { --bg:#160f24; --bar:#21173a; --fg:#ece6f7; --mute:#a99bc4; --line:#3a2d52; --acc:#b794f6; --hover:#2d2148; color-scheme:dark; }
+
+  [hidden] { display:none !important; }
+  * { box-sizing:border-box; margin:0; user-select:none; }
+  [hidden] { display:none !important; }
+  html,body { height:100%; overflow:hidden; background:var(--bg); color:var(--fg);
+    font-family:var(--font); font-size:var(--fs); line-height:1; transition:background-color .25s; }
+  button, input, select { font:inherit; }
+
+  #tablist { display:flex; align-items:flex-end; gap:2px; min-width:0; height:100%; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
+  #tablist::-webkit-scrollbar { display:none; }
+  #tabs > .wc { flex:none; }
+  #tabs { height:36px; display:flex; align-items:flex-end; gap:2px; padding:4px 6px 0; }
+  .tab { position:relative; display:flex; align-items:center; gap:6px; width:200px; min-width:70px; height:32px; padding:0 8px 0 12px;
+    border-radius:8px 8px 0 0; color:var(--mute); cursor:default; overflow:hidden; flex:0 1 200px;
+    transition:background-color .15s, color .15s, opacity .25s; }
+  .tab.entering { animation:tabIn .22s var(--ease) both; }
+  .tab.shift { transition:transform .16s var(--ease); will-change:transform; }
+  .tab:hover { background:var(--hover); }
+  .tab.on { background:var(--bar); color:var(--fg); }
+  .tab.sleep { opacity:.55; }
+  .tab::after { content:""; position:absolute; left:10px; right:10px; bottom:0; height:2px; border-radius:2px; background:var(--acc);
+    transform:scaleX(0); transition:transform .25s var(--ease); }
+  .tab.on::after { transform:scaleX(1); }
+  .tab span { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .tab.awaiting-detach { visibility:hidden; }
+  .tab.out { animation:tabOut .16s ease forwards; pointer-events:none; }
+  .sp { display:none; width:11px; height:11px; border:2px solid var(--line); border-top-color:var(--acc); border-radius:50%;
+    flex:none; animation:spin .7s linear infinite; }
+  .tab.loading .sp { display:block; }
+  .tab-icon { width:16px;height:16px;flex:none;display:grid;place-items:center;font-style:normal;pointer-events:none; }
+  .tab-icon > * { grid-area:1/1; }
+  .tab-icon img,.tab-icon svg { width:16px;height:16px;object-fit:contain; }
+  .tab-home { font-size:17px;font-weight:800;color:var(--acc); }
+  .tab.loading .tab-icon > :not(.sp) { display:none!important; }
+  @media(max-width:540px){.tab{gap:4px}.tab-icon,.tab-icon img,.tab-icon svg{width:14px;height:14px}.tab .x{width:14px;flex:none}}
+
+  .x, .btn { display:grid; place-items:center; border:0; background:none; color:inherit; border-radius:6px; cursor:pointer;
+    transition:background-color .12s, transform .1s var(--ease), color .15s; }
+  .x { width:18px; height:18px; font-size:14px; }
+  .x:hover, .btn:hover { background:var(--hover); }
+  .btn:active, .x:active { transform:scale(.88); }
+  #plus { margin-bottom:2px; }
+  #logo { width:22px; height:22px; margin:0 8px 6px 4px; align-self:flex-end; border-radius:6px; flex:none; }
+  .grow { flex:1; min-width:24px; align-self:stretch; }
+  .wc { align-self:flex-start; display:flex; height:36px; margin:-4px -6px 0 6px; }
+  .wc button { width:46px; height:36px; display:grid; place-items:center; border:0; background:none; color:var(--fg); cursor:default; transition:background-color .12s; }
+  .wc button:hover { background:var(--hover); }
+  .wc .wx:hover { background:#e81123; color:#fff; }
+  .tab.drag { position:relative; z-index:30; transition:none; animation:none; opacity:.92; box-shadow:0 8px 22px rgba(0,0,0,.35); background:var(--bar); }
+  .tab.drag.detach { opacity:.6; }
+  .tb { width:28px; height:28px; margin-bottom:2px; font-size:15px; }
+  #toast { position:fixed; left:50%; top:46px; transform:translate(-50%,-12px); padding:9px 18px; border-radius:10px; background:var(--fg); color:var(--bg);
+    opacity:0; pointer-events:none; z-index:20; transition:opacity .25s, transform .25s var(--ease); font-size:.95em; }
+  #toast.show { opacity:1; transform:translate(-50%,0); }
+  .blog { font-family:Consolas,monospace; font-size:.82em; color:var(--mute); line-height:1.5; margin-top:8px; word-break:break-all; max-height:150px; overflow:auto; user-select:text; }
+  #badge { display:none; margin:0 6px 5px 0; padding:4px 10px; border-radius:12px; background:var(--acc); color:#160f24;
+    font-weight:600; font-size:.92em; animation:tabIn .3s var(--ease) both; }
+  body.inc #badge { display:block; }
+
+  #nav { position:relative; height:44px; display:flex; align-items:center; gap:4px; padding:0 8px; background:var(--bar);
+    border-bottom:1px solid var(--line); transition:background-color .25s; }
+  .btn { width:30px; height:30px; font-size:16px; }
+  .btn.on { color:var(--acc); }
+  #back.history-empty, #fwd.history-empty { color:var(--mute); opacity:.38; }
+  #url { flex:1; height:30px; border:1px solid var(--line); border-radius:15px; padding:0 14px;
+    background:var(--bg); color:var(--fg); outline:none; user-select:text;
+    transition:border-color .15s, background-color .15s, box-shadow .2s; }
+  #url:focus { border-color:var(--acc); background:var(--bar); box-shadow:0 0 0 3px color-mix(in srgb, var(--acc) 20%, transparent); }
+  select { appearance:none; -webkit-appearance:none; height:30px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--fg); padding:0 24px 0 6px; background-image:linear-gradient(45deg,transparent 50%,var(--fg) 50%),linear-gradient(135deg,var(--fg) 50%,transparent 50%); background-position:calc(100% - 11px) 50%,calc(100% - 7px) 50%; background-size:4px 4px; background-repeat:no-repeat; }
+
+  /* индикатор загрузки */
+  #bar { position:absolute; left:0; right:0; bottom:-1px; height:2px; overflow:hidden; opacity:0; transition:opacity .25s; pointer-events:none; }
+  #bar::before { content:""; position:absolute; top:0; bottom:0; left:0; width:35%; background:var(--acc); border-radius:2px;
+    animation:slide 1.1s var(--ease) infinite paused; }
+  body.loading #bar { opacity:1; }
+  body.loading #bar::before { animation-play-state:running; }
+
+  /* панели: история и настройки */
+  #panel { position:fixed; left:0; right:0; top:80px; bottom:0; overflow:auto; background:var(--bg); animation:panelIn .26s var(--ease) both; }
+  #panel, #favoriteslist { scrollbar-width:thin; scrollbar-color:color-mix(in srgb,var(--mute) 58%,var(--bar)) transparent; }
+  .pin { max-width:780px; margin:0 auto; padding:22px 26px 40px; }
+  .ph { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+  .ph h2 { font-size:1.6em; font-weight:600; }
+  h3 { font-size:.85em; font-weight:600; color:var(--mute); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; }
+  .grp.developer-card { background:linear-gradient(120deg,color-mix(in srgb,var(--acc) 8%,var(--bar)),var(--bar) 68%); }
+  .developer-row { display:flex; align-items:center; flex-wrap:wrap; gap:14px; }
+  .developer-avatar { width:48px; height:48px; border-radius:14px; border:1px solid var(--line); }
+  .developer-info { flex:1 1 130px; display:grid; gap:6px; min-width:0; }
+  .developer-info strong { font-size:1.35em; font-weight:650; }
+  .developer-info span { color:var(--mute); line-height:1.3; }
+  .developer-links { display:flex; flex-wrap:wrap; gap:8px; }
+  .developer-links .chip:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+  .developer-support { display:flex; align-items:center; flex-wrap:wrap; gap:12px;
+    margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+  .support-icon { display:grid; place-items:center; flex:none; width:36px; height:36px; border-radius:10px;
+    background:color-mix(in srgb,var(--acc) 13%,var(--bar)); color:var(--acc); }
+  .support-copy { flex:1 1 175px; display:grid; gap:4px; line-height:1.4; }
+  .support-copy span { color:var(--mute); }
+  .support-links { display:flex; flex-wrap:wrap; gap:8px; }
+  .support-links .chip { border-color:color-mix(in srgb,var(--acc) 45%,var(--line)); }
+  .support-links .chip:hover { background:color-mix(in srgb,var(--acc) 12%,var(--bar)); }
+  .grp { background:var(--bar); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:14px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  .seg, .segx { display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+  .seg button, .segx button { border:0; background:none; color:var(--fg); padding:8px 14px; cursor:pointer; transition:background-color .15s, color .15s; }
+  .seg button:hover, .segx button:hover { background:var(--hover); }
+  .seg button.on, .segx button.on { background:var(--acc); color:#fff; }
+  .inp { height:36px; border:1px solid var(--line); border-radius:18px; padding:0 14px; background:var(--bg); color:var(--fg); outline:none;
+    user-select:text; min-width:240px; flex:1; transition:border-color .15s, box-shadow .2s; }
+  .inp:focus { border-color:var(--acc); box-shadow:0 0 0 3px color-mix(in srgb, var(--acc) 20%, transparent); }
+  .chip:disabled { opacity:.5; cursor:default; }
+  .msg { color:var(--acc); font-size:.92em; min-height:1.2em; margin-top:8px; }
+  .erow { display:flex; align-items:center; gap:12px; padding:10px 4px; border-top:1px solid var(--line); animation:tabIn .25s var(--ease) both; }
+  .erow:first-child { border-top:0; }
+  .erow b { flex:1; font-weight:500; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  a.lnk { color:var(--acc); cursor:pointer; text-decoration:underline; }
+
+  #p-settings { padding-bottom:56px; font-size:calc(var(--fs) + 2px); }
+  #p-settings > .ph h2 { font-size:clamp(20px,calc(2.1vw + 2px),25px); }
+  .settings-rail { position:sticky; top:0; z-index:2; padding:12px 0; margin-bottom:18px; background:var(--bg); }
+  .settings-nav { display:flex; gap:5px; overflow:auto;
+    padding:6px; border:1px solid var(--line); border-radius:13px; background:var(--bar); scrollbar-width:thin; }
+  .settings-nav a { flex:none; padding:10px 12px; border-radius:8px; color:var(--fg); text-decoration:none; white-space:nowrap; }
+  .settings-nav a:hover { background:var(--hover); }
+  .settings-nav a:focus-visible { outline:2px solid var(--acc); outline-offset:-2px; }
+  .settings-section { outline:none; }
+  .settings-section + .settings-section { margin-top:34px; }
+  .settings-section-title { margin:0 0 14px; font-size:1.15em; font-weight:600; }
+  #p-settings .grp { padding:clamp(16px,3vw,24px); margin-bottom:20px; }
+  #p-settings .grp > h3 { margin-bottom:15px; }
+  #p-settings .hint { line-height:1.5; }
+  #updategrp { margin-top:10px; }
+  #p-settings .accent-label { margin:18px 0 10px; }
+  #pick, #unpick { margin-top:4px; }
+  .accent-label { display:block; margin:14px 0 7px; color:var(--mute); }
+  .accent-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+  .accent-controls input[type=color] { width:44px; height:36px; padding:4px; border:1px solid var(--line); border-radius:9px; background:var(--bg); cursor:pointer; }
+  .accent-controls .inp { flex:0 1 110px; min-width:92px; font-family:Consolas,monospace; }
+  .chip { border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:9px; padding:8px 14px; cursor:pointer;
+    transition:background-color .15s, transform .1s var(--ease), border-color .15s; }
+  .chip:hover { background:var(--hover); border-color:var(--acc); }
+  .chip:active { transform:scale(.96); }
+  .vpn-card { display:grid; gap:16px; }
+  .vpn-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 16px; }
+  .vpn-header h3 { margin:0; color:var(--fg); font-size:1.25em; font-weight:650; text-transform:none; letter-spacing:normal; }
+  .vpn-state { display:inline-flex; align-items:center; gap:7px; border-radius:999px; padding:5px 10px;
+    background:var(--bg); border:1px solid var(--line); color:var(--mute); white-space:nowrap; }
+  .vpn-state::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .vpn-state[data-state="on"] { border-color:color-mix(in srgb,var(--acc) 45%,var(--line)); color:var(--fg); }
+  .vpn-state[data-state="on"]::before { background:var(--acc); }
+  .vpn-state[data-state="error"]::before { background:#df555d; }
+  .vpn-section { display:grid; gap:8px; min-width:0; }
+  .vpn-label { font-weight:600; }
+  .vpn-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .vpn-controls .inp, .vpn-controls .vpn-picker-trigger { flex:1 1 230px; min-width:0; height:38px; border-radius:9px; padding-inline:11px; }
+  .vpn-controls button { min-height:38px; max-width:100%; }
+  .vpn-picker-trigger { display:flex; align-items:center; justify-content:space-between; gap:12px; text-align:left; }
+  .vpn-picker-trigger span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vpn-picker-trigger::after { content:""; flex:none; width:7px; height:7px; margin:-4px 3px 0 0;
+    border:solid var(--mute); border-width:0 1.5px 1.5px 0; transform:rotate(45deg); }
+  .vpn-picker-trigger[aria-expanded="true"] { border-color:var(--acc); }
+  .vpn-picker-trigger[aria-expanded="true"]::after { transform:rotate(225deg); margin-top:4px; }
+  .vpn-picker-list { display:grid; gap:8px; padding:8px; background:var(--bg); border:1px solid var(--line); border-radius:10px; min-width:0; }
+  .vpn-picker-list .inp { width:100%; min-width:0; height:35px; border-radius:8px; padding-inline:10px; background:var(--bar); }
+  .vpn-options { display:grid; gap:3px; max-height:clamp(112px,34vh,218px); overflow:auto; overscroll-behavior:contain;
+    scrollbar-width:thin; scrollbar-color:color-mix(in srgb,var(--mute) 55%,transparent) transparent; }
+  .vpn-option { display:flex; align-items:center; justify-content:space-between; gap:9px; min-height:34px; width:100%;
+    padding:6px 9px; text-align:left; background:none; color:var(--fg); border:1px solid transparent; border-radius:7px; cursor:pointer; }
+  .vpn-option:hover { background:var(--hover); }
+  .vpn-option:focus-visible { outline:2px solid var(--acc); outline-offset:-2px; }
+  .vpn-option[aria-pressed="true"] { background:color-mix(in srgb,var(--acc) 16%,var(--bg));
+    border-color:color-mix(in srgb,var(--acc) 45%,var(--line)); }
+  .vpn-option-name { min-width:0; overflow-wrap:anywhere; }
+  .vpn-option-current { flex:none; color:var(--mute); font-size:.9em; }
+  .vpn-options-empty { padding:8px; }
+  .vpn-controls .vpn-primary { background:color-mix(in srgb,var(--acc) 18%,var(--bg)); border-color:color-mix(in srgb,var(--acc) 55%,var(--line)); }
+  .vpn-controls .vpn-primary:hover { background:color-mix(in srgb,var(--acc) 30%,var(--bg)); }
+  .vpn-card .hint { margin:0; line-height:1.45; }
+  .vpn-card .hint:empty { display:none; }
+  .vpn-import { border-top:1px solid var(--line); padding-top:12px; }
+  .vpn-import summary { width:fit-content; color:var(--fg); font-weight:550; cursor:pointer; }
+  .vpn-import summary:hover { color:var(--acc); }
+  .vpn-import .vpn-section { margin-top:11px; }
+  #vpn-settings:has(#vpn-servers[hidden]) .vpn-import { border-top:0; padding-top:0; }
+  #vpn-settings:has(#vpn-servers[hidden]) .vpn-import:not([open]) { border-top:1px solid var(--line); padding-top:12px; }
+  .chip.danger:hover { border-color:#dc2626; color:#dc2626; }
+  .swatches { display:flex; gap:10px; }
+  .swatches button { width:30px; height:30px; border-radius:50%; border:2px solid transparent; cursor:pointer;
+    transition:transform .15s var(--ease), box-shadow .15s; }
+  .swatches button:hover { transform:scale(1.12); }
+  .swatches button.on { box-shadow:0 0 0 2px var(--bar), 0 0 0 4px var(--fg); }
+  .tiles { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; }
+  .tile { width:96px; height:60px; border-radius:10px; border:2px solid var(--line); cursor:pointer; background-size:cover; background-position:center;
+    color:var(--mute); display:grid; place-items:center; font-size:.85em; transition:transform .15s var(--ease), border-color .15s; }
+  .tile:hover { transform:translateY(-2px); }
+  .tile.on { border-color:var(--acc); box-shadow:0 0 0 2px color-mix(in srgb, var(--acc) 30%, transparent); }
+  .hint { color:var(--mute); font-size:.9em; margin-top:10px; line-height:1.4; }
+
+  #hq { width:100%; height:38px; border:1px solid var(--line); border-radius:19px; padding:0 16px; background:var(--bar); color:var(--fg);
+    outline:none; user-select:text; margin-bottom:12px; transition:border-color .15s, box-shadow .2s; }
+  #hq:focus { border-color:var(--acc); box-shadow:0 0 0 3px color-mix(in srgb, var(--acc) 20%, transparent); }
+  .day { margin:16px 0 6px; font-weight:600; color:var(--mute); font-size:.9em; }
+  .hrow { display:flex; align-items:center; gap:12px; padding:9px 10px; border-radius:9px; cursor:pointer; transition:background-color .12s; }
+  .hrow:hover { background:var(--hover); }
+  .hrow .tm { color:var(--mute); width:44px; flex:none; font-variant-numeric:tabular-nums; }
+  .hrow .tt { flex:1; min-width:0; }
+  .hrow .tt b { display:block; font-weight:500; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .hrow .tt i { display:block; font-style:normal; color:var(--mute); font-size:.88em; margin-top:3px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .hrow .x { opacity:0; }
+  .hrow:hover .x { opacity:1; }
+  .favorite-link { text-align:left; padding:0; border:0; background:none; color:inherit; cursor:pointer; }
+  .favorite-link { display:flex; align-items:center; gap:10px; }
+  .favorite-label { flex:1; min-width:0; }
+  .favorite-icon { position:relative; display:grid; place-items:center; flex:none; width:30px; height:30px;
+    border-radius:8px; overflow:hidden; color:#fff; font-weight:600; }
+  .favorite-icon img { position:absolute; inset:0; width:100%; height:100%; padding:5px; object-fit:scale-down; background:#fff; }
+  .hrow .favorite-remove { opacity:1; flex:none; color:var(--mute); width:26px; height:26px; }
+  .hrow .favorite-remove:hover, .hrow .favorite-remove:focus-visible { color:var(--fg); background:var(--bar); }
+  .empty { text-align:center; color:var(--mute); padding:50px 0; }
+
+  @keyframes tabIn  { from { opacity:0; transform:translateY(6px) scale(.96); } to { opacity:1; transform:none; } }
+  @keyframes tabOut { to { opacity:0; transform:scale(.94); width:0; min-width:0; flex-basis:0; padding:0; } }
+  @keyframes spin   { to { transform:rotate(360deg); } }
+  @keyframes slide  { from { transform:translateX(-100%); } to { transform:translateX(300%); } }
+  @keyframes panelIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
+  }
+  /* Keep browser controls on one line; panels reflow independently. */
+  #url { min-width:60px; width:0; }
+  #nav > button, #nav > select { flex-shrink:0; }
+  #tabs { min-width:0; }
+  .tab { flex-shrink:1; }
+  .grow { min-width:4px; }
+  .pin { width:100%; padding:clamp(12px,2.5vw,26px); }
+  .inp { min-width:min(240px,100%); max-width:100%; }
+  .seg,.segx { max-width:100%; flex-wrap:wrap; }
+  .ph h2 { font-size:clamp(18px,2.1vw,23px); line-height:1.3; }
+  .row > * { max-width:100%; }
+  .hint { overflow-wrap:anywhere; }
+  #toast { top:8px; max-width:calc(100vw - 24px); max-height:64px; overflow:auto; box-sizing:border-box; text-align:center; line-height:1.4; }
+  @media(max-width:900px) { #engine { width:84px; } .wc button { width:36px; } #zreset { padding:6px 8px; } }
+  @media(max-width:720px) { #engine,#star { display:none; } #nav{gap:2px;padding:0 5px}.btn{width:27px} .tab{min-width:52px} #logo{margin-right:3px} .tb{width:25px}.wc button{width:32px} }
+  @media(max-width:540px) { #inc { display:none; } .tab{min-width:44px;padding-left:6px} .grp{padding:12px} .chip{padding:7px 9px} }
+  @media(max-height:500px) { .pin { padding-top:12px; } .ph{margin-bottom:10px} }
+  #panel.favorites-popup {
+    left:auto; right:24px; top:90px; bottom:auto;
+    width:min(390px, calc(100vw - 36px)); height:min(500px, calc(100vh - 102px));
+    background:var(--bar); border:1px solid var(--line); border-radius:8px;
+    animation:none; overflow:hidden;
+  }
+  #p-favorites { height:100%; display:flex; flex-direction:column; padding:12px; }
+  #p-favorites .ph { flex:none; margin:0 0 6px; padding:0 2px 8px; border-bottom:1px solid var(--line); }
+  #p-favorites .ph h2 { font-size:1.2em; }
+  #favoriteslist { min-height:0; overflow:auto; overscroll-behavior:contain; padding-right:4px; }
+</style>
+<style>
+button:focus{outline:none}button:focus-visible{outline:2px solid var(--acc);outline-offset:-3px}
+.wc button{overflow:hidden}.wc button:focus-visible{box-shadow:inset 0 0 0 2px var(--acc);outline:0}
+.resize{position:fixed;z-index:100;touch-action:none;background:transparent}.resize.n{top:0;left:5px;right:5px;height:3px;cursor:n-resize}.resize.ne{right:0;top:0;width:5px;height:5px;cursor:ne-resize}.resize.nw{left:0;top:0;width:5px;height:5px;cursor:nw-resize}.resize.e{right:0;top:5px;height:75px;width:3px;cursor:e-resize}.resize.w{left:0;top:5px;height:75px;width:3px;cursor:w-resize}body.maximized .resize,:root[data-platform=windows] .resize{display:none}
+</style>
+<style>button,button:hover,button:active,button:focus,button:focus-visible{transform:none!important;transition:none!important;box-shadow:none!important;outline:none!important}.wc{overflow:hidden}.wc button{border-radius:0!important}.btn:active,.x:active,.chip:active{transform:none!important}</style><style>
+.btn:hover,.x:hover,.wc button:hover,.wc .wx:hover{background:transparent!important}
+.wc .wx:hover{color:var(--fg)!important}.chip:hover{background:var(--bg);border-color:var(--line)}
+.seg button:hover,.segx button:hover{background:transparent}
+.seg button.on:hover,.segx button.on:hover{background:var(--acc);color:#fff}
+</style><style>
+html[data-platform="linux"] #panel { animation:none; }
+html[data-platform="linux"] .settings-rail { box-shadow:none; }
+html[data-platform="linux"] [data-platform-only="windows"],
+html[data-platform="linux"] #extbtn,
+html[data-platform="linux"] #updf,html[data-platform="linux"] .segx[data-x="level"],
+html[data-platform="linux"] #bstat,html[data-platform="linux"] #blog,
+html[data-platform="linux"] h3:has(+ #bstat),
+html[data-platform="linux"] .grp:has(.segx[data-x="sleep"]),
+html[data-platform="linux"] .grp:has(.segx[data-x="engine-memory"]){display:none!important}
+</style><style>
+#downloadsbtn{position:relative}#dlbadge{position:absolute;right:0;top:0;min-width:12px;border-radius:7px;background:var(--acc);color:white;font-size:9px;line-height:12px;text-align:center;padding:0 2px}
+.dl-row{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:12px;padding:18px 0;border-bottom:1px solid var(--line)}.dl-symbol{color:var(--acc);padding-top:2px}.dl-name{font-weight:600;overflow-wrap:anywhere;line-height:1.5}.dl-path,.dl-meta{color:var(--mute);font-size:12px;line-height:1.6;overflow-wrap:anywhere}.dl-progress{display:block;width:100%;height:5px;border:0;margin:9px 0;accent-color:var(--acc)}.dl-actions{display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap}.dl-actions button{font-size:12px}.dl-error{color:#e27676}
+@media(max-width:650px){.dl-actions{grid-column:2/-1}.dl-row{grid-template-columns:26px minmax(0,1fr)}}
+</style></head>
+<body>
+  <div class="resize n" data-resize="n"></div><div class="resize ne" data-resize="ne"></div><div class="resize nw" data-resize="nw"></div><div class="resize e" data-resize="e"></div><div class="resize w" data-resize="w"></div>
+  <div id="tabs">
+    <img id="logo" alt="Lumen" src="data:image/png;base64,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">
+    <div id="tablist" aria-label="Вкладки"></div>
+    <button class="btn" id="plus" title="Новая вкладка (Ctrl+T)">+</button>
+    <div class="grow"></div>
+    <div id="badge" title="История, куки и кэш не сохраняются">🕶 Инкогнито</div>
+    <button class="btn tb" id="downloadsbtn" title="Загрузки (Ctrl+J)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></svg><span id="dlbadge" hidden></span></button>
+    <button class="btn tb" id="hist" title="История (Ctrl+H)">🕒</button>
+    <button class="btn tb" id="favoritesbtn" title="Избранное" hidden><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M6 4h12v16l-6-4-6 4z"/></svg></button>
+    <button class="btn tb" id="extbtn" title="Расширения">🧩</button>
+    <button class="btn tb" id="inc" title="Окно инкогнито (Ctrl+Shift+N)">🕶</button>
+    <button class="btn tb" id="shield" title="Блокировка рекламы">🛡</button>
+    <button class="btn tb" id="gear" title="Настройки (Ctrl+,)">⚙</button>
+    <div class="wc">
+      <button id="wmin" title="Свернуть"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor"/></svg></button>
+      <button id="wmax" title="Развернуть"><svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button>
+      <button id="wclose" class="wx" title="Закрыть"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></button>
+    </div>
+  </div>
+  <div id="nav">
+    <button class="btn history-empty" id="back" title="Назад (Alt+←)">←</button>
+    <button class="btn history-empty" id="fwd" title="Вперёд (Alt+→)">→</button>
+    <button class="btn" id="rel" title="Обновить (F5)">⟳</button>
+    <input id="url" placeholder="Поиск или адрес сайта" spellcheck="false" autocomplete="off">
+    <button class="btn" id="zout" title="Уменьшить (Ctrl+−)">−</button>
+    <button class="chip" id="zreset" title="Сбросить масштаб (Ctrl+0)">100%</button>
+    <button class="btn" id="zin" title="Увеличить (Ctrl++)">+</button>
+    <button class="btn" id="devbtn" title="Инструменты разработчика">&lt;/&gt;</button>
+    <button class="btn" id="star" title="Добавить в быстрые ссылки (Ctrl+D)">☆</button>
+    <select id="engine" title="Поисковая система">
+      <option value="google">Google</option>
+      <option value="yandex">Яндекс</option>
+      <option value="duckduckgo">DuckDuckGo</option>
+    </select>
+    <div id="bar"></div>
+  </div>
+  <div id="toast"></div>
+
+  <div id="panel" hidden>
+    <div class="pin" id="p-favorites" hidden>
+      <div class="ph"><h2>Избранное</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
+      <div id="favoriteslist"></div>
+    </div>
+    <div class="pin" id="p-downloads" hidden>
+      <div class="ph"><h2>Загрузки</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
+      <div class="row" style="margin-bottom:16px"><input class="inp" id="dlq" placeholder="Найти файл" autocomplete="off" spellcheck="false"><button class="chip" id="dlopenfolder">Папка загрузок</button><button class="chip" id="dlclear">Очистить список</button></div>
+      <div class="hint" style="margin-bottom:18px">Файлы сохраняются в папку «Загрузки». Очистка списка не удаляет файлы.</div>
+      <div id="dlempty" class="grp">Пока нет загрузок. Файлы с сайтов появятся здесь.</div>
+      <div id="dllist"></div>
+    </div>
+    <!-- ИСТОРИЯ -->
+    <div class="pin" id="p-history" hidden>
+      <div class="ph"><h2>История</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
+      <input id="hq" placeholder="Поиск по истории" autocomplete="off" spellcheck="false">
+      <div class="row" style="margin-bottom:6px"><button class="chip danger" id="hclear">Очистить историю</button></div>
+      <div id="hlist"></div>
+    </div>
+
+    <!-- РАСШИРЕНИЯ -->
+    <div class="pin" id="p-ext" hidden>
+      <div class="ph"><h2>Расширения</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
+      <div class="grp"><h3>Установить из Chrome Web Store</h3>
+        <div class="row"><input class="inp" id="extin" placeholder="Ссылка, ID или путь к папке с manifest.json" spellcheck="false" autocomplete="off">
+          <button class="chip" id="extgo">Установить</button></div>
+        <div class="msg" id="extmsg"></div>
+        <div class="hint">Вставьте ссылку из Chrome Web Store, ID или путь к распакованному расширению. После установки обновите страницы. Кнопка «Открыть» показывает popup или настройки расширения. Совместимость зависит от API WebView2; установка не гарантирует работу всех функций.</div>
+      </div>
+      <div class="grp"><h3>Установленные</h3><div id="extlist"></div>
+        <div class="row" style="margin-top:12px"><button class="chip" id="extdir">Открыть папку расширений</button></div>
+        <div class="hint">В этой папке лежат файлы установленных расширений.</div>
+      </div>
+    </div>
+
+    <!-- НАСТРОЙКИ -->
+    <div class="pin" id="p-settings" hidden>
+      <div class="ph"><h2>Настройки</h2><button class="btn pclose" title="Закрыть (Esc)">✕</button></div>
+
+      <div id="settings-rail" class="settings-rail">
+      <nav class="settings-nav" aria-label="Разделы настроек">
+        <a href="#settings-general">Общие</a>
+        <a href="#settings-appearance">Персонализация</a>
+        <a href="#settings-adblock">Блокировка рекламы</a>
+        <a href="#settings-performance">Оптимизация</a>
+        <a id="settings-link-privacy" href="#settings-privacy">Поиск</a>
+      </nav>
+      </div>
+
+      <section class="settings-section" id="settings-general" aria-labelledby="settings-title-general" tabindex="-1">
+        <h3 class="settings-section-title" id="settings-title-general">Общие</h3>
+        <div class="grp"><h3>Браузер по умолчанию</h3>
+          <button class="chip" id="defaultbrowser">Выбрать Lumen в Windows…</button>
+          <div class="hint">Открыть системные настройки для ссылок HTTP и HTTPS. Выбор подтверждается в Windows.</div>
+        </div>
+
+        <div class="grp"><h3>Обновления</h3>
+          <p class="hint" id="installedversion"></p>
+          <div id="updategrp" hidden>
+            <button class="chip" id="checkupdate" hidden>Проверить обновления</button>
+            <button class="chip" id="applyupdate" hidden>Перезапустить и обновить</button>
+            <div class="hint" id="updatestatus" role="status"></div>
+          </div>
+        </div>
+
+        <div class="grp developer-card"><h3>О разработчике</h3>
+          <div class="developer-row">
+            <img class="developer-avatar" src="data:image/png;base64,__DEVELOPER_AVATAR__" width="48" height="48" alt="">
+            <div class="developer-info"><strong>L4NOTTE</strong><span>Разработчик Lumen · Ижевск</span></div>
+            <div class="developer-links">
+              <button class="chip" id="developerprofile">Профиль на GitHub ↗</button>
+              <button class="chip" id="developerrepo">Исходный код ↗</button>
+            </div>
+          </div>
+          <div class="developer-support">
+            <span class="support-icon" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 20s-8-4.7-8-10a4.5 4.5 0 0 1 8-2.9A4.5 4.5 0 0 1 20 10c0 5.3-8 10-8 10Z"/></svg></span>
+            <div class="support-copy"><strong>Поддержать Lumen</strong><span>Ссылки для донатов появятся здесь.</span></div>
+            <div class="support-links" id="supportlinks" hidden></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section" id="settings-appearance" aria-labelledby="settings-title-appearance" tabindex="-1">
+        <h3 class="settings-section-title" id="settings-title-appearance">Персонализация</h3>
+        <div class="grp"><h3>Тема</h3>
+          <div class="seg" data-k="theme">
+            <button data-v="system">Как в системе</button><button data-v="light">Светлая</button><button data-v="dark">Тёмная</button>
+          </div>
+          <div class="hint">Тема применяется к интерфейсу браузера. Сайты выбирают оформление сами.</div>
+        </div>
+
+        <div class="grp"><h3>Акцентный цвет</h3>
+          <div class="swatches" id="sw"></div>
+          <label class="accent-label" for="accenthex">Свой цвет</label>
+          <div class="accent-controls">
+            <input type="color" id="customaccent" aria-label="Палитра акцентного цвета" value="#4f46e5">
+            <input class="inp" type="text" id="accenthex" placeholder="#4f46e5" maxlength="7" spellcheck="false" autocomplete="off">
+            <button class="chip" id="accentreset" type="button">Сбросить</button>
+          </div>
+        </div>
+
+        <div class="grp"><h3>Шрифт интерфейса</h3>
+          <div class="row">
+            <select id="font">
+              <option value="system">Системный (Segoe UI)</option><option value="arial">Arial</option><option value="verdana">Verdana</option>
+              <option value="georgia">Georgia (с засечками)</option><option value="trebuchet">Trebuchet MS</option><option value="consolas">Consolas (моноширинный)</option>
+            </select>
+            <div class="seg" data-k="font_size">
+              <button data-v="small">Мелкий</button><button data-v="normal">Обычный</button><button data-v="large">Крупный</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grp"><h3>Фон главного экрана</h3>
+          <div class="tiles" id="tiles"></div>
+          <div class="row">
+            <button class="chip" id="pick">Выбрать своё фото…</button>
+            <button class="chip danger" id="unpick">Удалить своё фото</button>
+            <input type="file" id="file" accept="image/*" hidden>
+          </div>
+          <div class="hint">Фото уменьшается и хранится только на этом компьютере. Фон показывается на стартовой странице новой вкладки.</div>
+        </div>
+      </section>
+
+      <section class="settings-section" id="settings-adblock" aria-labelledby="settings-title-adblock" tabindex="-1">
+        <h3 class="settings-section-title" id="settings-title-adblock">Блокировка рекламы</h3>
+        <div class="grp">
+          <div class="segx" data-x="level"><button data-v="strong">Усиленная</button><button data-v="basic">Базовая</button></div>
+          <div class="hint" id="fstat"></div>
+          <div class="row" style="margin-top:10px"><button class="chip" id="updf">Обновить фильтры</button></div>
+          <h3 style="margin-top:16px">Блоки с пометкой «Реклама»</h3>
+          <div class="segx" data-x="labels"><button data-v="on">Скрывать</button><button data-v="off">Не трогать</button></div>
+          <div class="hint">Скрывает рекламные карточки по метке «Реклама», «Соцреклама» или «erid» — помогает там, где реклама приходит с самого сайта (например, Яндекс).</div>
+          <h3 style="margin-top:16px">Что заблокировано</h3>
+          <div class="hint" id="bstat" style="margin-top:0"></div>
+          <div class="blog" id="blog"></div>
+          <div class="hint" data-platform-only="windows">Усиленная: списки EasyList, RU AdList, AdGuard Russian и uBlock проверяют каждый запрос страницы и скрывают пустые рекламные места.
+            Занимает больше памяти (десятки МБ). Базовая: лёгкий встроенный список доменов.</div>
+        </div>
+      </section>
+
+      <section class="settings-section" id="settings-performance" aria-labelledby="settings-title-performance" tabindex="-1">
+        <h3 class="settings-section-title" id="settings-title-performance">Оптимизация</h3>
+        <div class="grp"><h3>Память и скорость</h3>
+          <div class="hint" style="margin-top:0;margin-bottom:8px">Выгружать фоновые вкладки из памяти через:</div>
+          <div class="segx" data-x="sleep"><button data-v="3">3 мин</button><button data-v="5">5 мин</button><button data-v="10">10 мин</button><button data-v="0">Никогда</button></div>
+          <div class="hint">Если открыто много вкладок, браузер может раньше выгрузить те, которыми давно не пользовались. При возвращении выгруженная страница загрузится заново.</div>
+          <div class="hint" style="margin-top:14px;margin-bottom:8px">Память WebView2 (после перезапуска)</div>
+          <div class="segx" data-x="engine-memory">
+            <button data-v="standard">Обычный</button><button data-v="economy">Экономный</button>
+          </div>
+          <div class="hint">Экономный режим освобождает память, отключая кеш переходов назад и вперёд. Графика работает в обычном режиме.</div>
+        </div>
+
+        <div class="grp"><h3>При запуске</h3>
+          <div class="segx" data-x="startup"><button data-v="restore">Вернуть открытые вкладки</button><button data-v="new">Новая вкладка</button></div>
+          <div class="hint" data-platform-only="windows">Вернуть вкладки: откроется то, что было в прошлый раз (загружается только активная вкладка, остальные ждут своего часа и не тратят память).</div>
+        </div>
+      </section>
+
+      <section class="settings-section" id="settings-privacy" aria-labelledby="settings-title-privacy" tabindex="-1">
+        <h3 class="settings-section-title" id="settings-title-privacy">Поиск</h3>
+        <div class="grp"><h3>Поиск и защита</h3>
+          <div class="row">
+            <select id="engine2">
+              <option value="google">Google</option><option value="yandex">Яндекс</option><option value="duckduckgo">DuckDuckGo</option>
+            </select>
+            <button class="chip" id="adb">Блокировка рекламы</button>
+          </div>
+        </div>
+
+        <div class="grp vpn-card" id="vpn-settings" hidden>
+          <div class="vpn-header">
+            <h3>VPN для Lumen</h3>
+            <span class="vpn-state" id="vpn-state" data-state="off">Выключен</span>
+          </div>
+          <div class="hint" id="vpn-current-server" hidden></div>
+          <div class="hint" id="vpn-read-only" hidden>Для смены VPN верните отдельные вкладки в основное окно. Если оно закрыто, откройте Lumen заново.</div>
+          <div class="vpn-section" id="vpn-servers" hidden>
+            <div class="vpn-label" id="vpn-server-label">Сервер</div>
+            <div class="vpn-controls">
+              <button class="chip vpn-picker-trigger" id="vpn-server" type="button" aria-expanded="false" aria-controls="vpn-server-picker"
+                aria-labelledby="vpn-server-label vpn-server-name"><span id="vpn-server-name"></span></button>
+              <button class="chip vpn-primary" id="vpn-use-server" type="button">Подключить</button>
+              <button class="chip" id="vpn-find-server" type="button">Найти доступный</button>
+            </div>
+            <div class="hint" id="vpn-search-status" role="status"></div>
+            <div class="vpn-picker-list" id="vpn-server-picker" role="group" aria-labelledby="vpn-server-label" hidden>
+              <input class="inp" type="search" id="vpn-server-search" aria-label="Поиск сервера" placeholder="Найти сервер" autocomplete="off">
+              <div class="vpn-options" id="vpn-server-options"></div>
+              <div class="hint vpn-options-empty" id="vpn-server-empty" role="status" hidden>Серверы не найдены</div>
+            </div>
+            <div class="hint">Lumen перезапустится и восстановит вкладки из всех окон в основном окне.</div>
+          </div>
+          <div class="hint" id="vpn-status" role="status"></div>
+          <div class="vpn-controls" id="vpn-session-actions" hidden>
+            <button class="chip" id="vpn-check" type="button" hidden>Проверить соединение</button>
+            <button class="chip" id="vpn-disconnect" type="button" title="Отключить VPN и перезапустить Lumen" hidden>Отключить</button>
+          </div>
+          <details class="vpn-import" id="vpn-import" open>
+            <summary id="vpn-import-title">Добавить подписку или ключ</summary>
+            <div class="vpn-section">
+              <div class="vpn-controls">
+                <input class="inp" type="password" id="vpn-key" aria-label="Ключ VPN или ссылка подписки" placeholder="HTTPS-ссылка или ключ vless://" spellcheck="false" autocomplete="off">
+                <button class="chip" id="vpn-connect" type="button">Импортировать</button>
+              </div>
+              <div class="hint" id="vpn-import-status" role="status"></div>
+            </div>
+          </details>
+        </div>
+      </section>
+    </div>
+  </div>
+
+<script>
+const send = (o) => window.ipc.postMessage(JSON.stringify(o));
+const $ = (id) => document.getElementById(id);
+// Native title bubbles are painted outside the toolbar WebView, causing the
+// stray bordered rectangle. Keep accessible labels without native bubbles.
+function removeNativeHints(root) {
+  const elements = root.nodeType === 1 ? [root, ...root.querySelectorAll('[title]')] : [...root.querySelectorAll('[title]')];
+  for (const el of elements) {
+    const text = el.getAttribute('title');
+    if (text === null) continue;
+    if (text) { el.setAttribute('aria-label', text); el.setAttribute('data-hint', text); }
+    el.removeAttribute('title');
+  }
+}
+removeNativeHints(document);
+new MutationObserver(records => { for (const r of records) { if (r.type === 'attributes') removeNativeHints(r.target); else r.addedNodes.forEach(n => { if (n.nodeType === 1) removeNativeHints(n); }); } }).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['title']});
+let state = { tabs: [], active: 0, panel: '', set: {} };
+let vpnServerIndex = -1;
+let lastFrameTheme = null;
+const frameMedia = matchMedia('(prefers-color-scheme: dark)');
+function syncFrameTheme() {
+  const dark = state.incognito || state.set.theme === 'dark' || (state.set.theme !== 'light' && frameMedia.matches);
+  if (dark !== lastFrameTheme) { lastFrameTheme = dark; send({cmd:'frame_theme',dark}); }
+  if (state.look) {
+    const accent = /^#[0-9a-f]{6}$/i.test(state.set.accent || '') ? state.set.accent : dark ? state.look.ad : state.look.al;
+    $('customaccent').value = accent;
+    if (document.activeElement !== $('accenthex')) $('accenthex').value = accent;
+  }
+}
+frameMedia.addEventListener('change',syncFrameTheme);
+let hist = [];
+let lastPanel = '';
+let lastSettingsState = '';
+let activeTabDrag = null, pendingTabOrder = null;
+const pendingDetaches = new Map();
+window.resetTabDrag = () => {
+  activeTabDrag?.();
+  pendingTabOrder = null;
+  for (const timer of pendingDetaches.values()) clearTimeout(timer);
+  pendingDetaches.clear();
+  const tabs = [...$('tablist').querySelectorAll('.tab:not(.out)')];
+  for (const tab of tabs) {
+    tab.classList.remove('awaiting-detach', 'drag', 'detach', 'shift');
+    tab.style.transform = '';
+  }
+};
+const els = new Map(); // id -> элемент вкладки (обновляем, а не пересоздаём — анимации не сбрасываются)
+const tabParts = new WeakMap();
+const tabIcons = new Map(); // only icons referenced by the current tabs
+window.onTabIcon = (key,data) => {
+  if(typeof key==='string'&&/^[a-f0-9]{64}$/.test(key)&&typeof data==='string'&&data.length<=13678&&data.startsWith('data:image/png;base64,'))tabIcons.set(key,data);
+};
+
+const ACC = { indigo:'#4f46e5', blue:'#2563eb', green:'#16a34a', orange:'#ea580c', pink:'#db2777', red:'#dc2626' };
+const GRAD = {
+  g1:'linear-gradient(135deg,#4f46e5,#9333ea 50%,#ec4899)', g2:'linear-gradient(135deg,#0ea5e9,#22d3ee 50%,#34d399)',
+  g3:'linear-gradient(160deg,#0f172a,#1e293b 50%,#334155)',  g4:'linear-gradient(135deg,#f97316,#ef4444 50%,#7c3aed)'
+};
+let thumb = null; // превью своего фото (только в этой сессии)
+
+// ---------- вкладки ----------
+function dragSlot(centers, x) {
+  let low = 0, high = centers.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (centers[mid] < x) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+window.tabDropIndex = x => {
+  const centers = [...$('tablist').querySelectorAll('.tab:not(.out)')].map(el => {
+    const rect = el.getBoundingClientRect();
+    return rect.left + rect.width / 2;
+  });
+  return dragSlot(centers, x);
+};
+function settleTabs(order, duration = 120) {
+  const tabs = order.filter(el => el.isConnected && !el.classList.contains('out'));
+  const before = new Map(tabs.map(el => [el, el.getBoundingClientRect()]));
+  for (const el of tabs) {
+    el.getAnimations().forEach(animation => animation.cancel());
+    el.classList.remove('drag', 'detach', 'shift', 'entering');
+    el.style.transform = '';
+  }
+  const box = $('tablist');
+  const tabSet = new Set(tabs);
+  const current = [...box.children].filter(el => tabSet.has(el));
+  if (tabs.some((el, i) => current[i] !== el)) tabs.forEach(el => box.append(el));
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced) return;
+  const after = tabs.map(el => el.getBoundingClientRect());
+  tabs.forEach((el, index) => {
+    const from = before.get(el), to = after[index];
+    const dx = from.left - to.left, dy = from.top - to.top;
+    if (Math.hypot(dx, dy) > .5) el.animate([
+      {transform:`translate(${dx}px,${dy}px)`}, {transform:'translate(0,0)'}
+    ], {duration, easing:'cubic-bezier(.2,.8,.2,1)'});
+  });
+}
+window.cancelTabDrop = id => {
+  if (!pendingDetaches.has(id)) return;
+  clearTimeout(pendingDetaches.get(id));
+  pendingDetaches.delete(id);
+  els.get(id)?.classList.remove('awaiting-detach');
+  settleTabs([...$('tablist').querySelectorAll('.tab:not(.out):not(.awaiting-detach)')], 85);
+};
+function makeTab(t) {
+  const d = document.createElement('div');
+  d.className = 'tab entering'; d.dataset.id = t.id;
+  setTimeout(() => d.classList.remove('entering'), 250);
+  const sp = document.createElement('i'); sp.className = 'sp';
+  const icon=document.createElement('i');icon.className='tab-icon';icon.setAttribute('aria-hidden','true');
+  const img=document.createElement('img');img.className='tab-favicon';img.alt='';img.draggable=false;img.hidden=true;
+  const home=document.createElement('b');home.className='tab-home';home.textContent='L';
+  const globe=document.createElementNS('http://www.w3.org/2000/svg','svg');globe.classList.add('tab-globe');globe.setAttribute('viewBox','0 0 24 24');globe.setAttribute('fill','none');globe.setAttribute('stroke','currentColor');globe.setAttribute('stroke-width','1.5');
+  globe.innerHTML='<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/>';
+  img.onerror=()=>{img.hidden=true;home.hidden=!!d.dataset.site;globe.toggleAttribute('hidden',!d.dataset.site);};
+  icon.append(img,home,globe,sp);
+  const label = document.createElement('span');
+  const x = document.createElement('button'); x.className = 'x'; x.textContent = '×';
+  x.onclick = (e) => { e.stopPropagation(); send({ cmd: 'close_tab', id: t.id }); };
+  d.onclick = e => { if (e.detail === 0) send({ cmd: 'switch', id: t.id }); };
+  d.addEventListener('contextmenu', e => {
+    if ((state.platform || 'windows') !== 'windows') return;
+    e.preventDefault();
+    send({cmd:'tab_menu', id:t.id});
+  });
+  d.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('.x')) return;
+    activeTabDrag?.();
+    if (pendingDetaches.size) return;
+    const tabs = [...d.parentElement.querySelectorAll('.tab:not(.out)')];
+    const startIndex = tabs.indexOf(d);
+    const others = tabs.flatMap((el, slot) => el === d ? [] : [{el, slot}]);
+    let strip, slots, centers;
+    const sx = e.clientX, sy = e.clientY;
+    const canDetach = !state.incognito;
+    let moved = false, frame = 0, px = sx, py = sy, index = startIndex, detached = false;
+    try { d.setPointerCapture(e.pointerId); } catch (_) { return; }
+    const preview = () => {
+      frame = 0;
+      const dx = px - sx, dy = py - sy;
+      if (!moved && Math.hypot(dx, dy) < 8) return;
+      if (!moved) {
+        moved = true;
+        for (const el of tabs) {
+          el.getAnimations().forEach(animation => animation.finish());
+          el.classList.remove('entering');
+        }
+        strip = $('tabs').getBoundingClientRect();
+        slots = tabs.map(el => el.getBoundingClientRect());
+        centers = others.map(({slot}) => slots[slot].left + slots[slot].width / 2);
+        d.classList.add('drag');
+      }
+      const margin = state.detached ? 0 : 24;
+      const far = canDetach && (py < strip.top - margin || py >= strip.bottom + margin
+        || px < strip.left - margin || px >= strip.right + margin);
+      if (far !== detached) {
+        d.classList.toggle('detach', far);
+        detached = far;
+      }
+      d.style.transform = `translate(${dx}px,${far ? dy : 0}px)`;
+      const center = slots[startIndex].left + slots[startIndex].width / 2 + dx;
+      const next = far ? startIndex : dragSlot(centers, center);
+      for (let i = Math.min(index, next); i < Math.max(index, next); i++) {
+        const {el, slot} = others[i];
+        const dest = i < next ? i : i + 1;
+        const delta = slots[dest].left - slots[slot].left;
+        el.classList.add('shift');
+        el.style.transform = delta ? `translateX(${delta}px)` : '';
+      }
+      index = next;
+    };
+    const move = ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      px = ev.clientX; py = ev.clientY;
+      if (!frame) frame = requestAnimationFrame(preview);
+    };
+    const clean = () => {
+      cancelAnimationFrame(frame);
+      d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up);
+      d.removeEventListener('pointercancel', cancel); d.removeEventListener('lostpointercapture', cancel);
+      removeEventListener('resize', cancel);
+      activeTabDrag = null;
+      try { d.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+    const cancel = () => { clean(); if (moved) settleTabs(tabs); };
+    const up = ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      px = ev.clientX; py = ev.clientY; cancelAnimationFrame(frame); preview();
+      const detach = detached;
+      clean();
+      if (!moved) {
+        send({ cmd: 'switch', id: t.id });
+        return;
+      }
+      const order = others.map(({el}) => el); order.splice(index, 0, d);
+      if (!detach) pendingTabOrder = {ids:order.map(el=>+el.dataset.id),until:performance.now()+1500};
+      if (detach) {
+        d.classList.add('awaiting-detach');
+        pendingDetaches.set(t.id, setTimeout(() => window.cancelTabDrop(t.id), 400));
+      } else {
+        settleTabs(order);
+      }
+      send({cmd:'drop_tab', id:t.id, index, detach});
+    };
+    activeTabDrag = cancel;
+    activeTabDrag.ids = tabs.map(el => +el.dataset.id);
+    d.addEventListener('pointermove', move); d.addEventListener('pointerup', up);
+    d.addEventListener('pointercancel', cancel); d.addEventListener('lostpointercapture', cancel);
+    addEventListener('resize', cancel, {once:true});
+  });
+  d.addEventListener('mousedown', e => { if (e.button === 1) e.preventDefault(); });
+  d.onauxclick = e => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    send({ cmd: 'close_tab', id: t.id });
+  };
+  d.append(icon, label, x);
+  tabParts.set(d, {img, home, globe, label});
+  return d;
+}
+// ---------- настройки ----------
+function buildStatic() {
+  const sw = $('sw');
+  for (const k in ACC) {
+    const b = document.createElement('button'); b.dataset.v = k; b.style.background = ACC[k]; b.title = k;
+    b.onclick = () => setLook({ accent: k }); sw.append(b);
+  }
+  const tiles = $('tiles');
+  const mk = (v, label, bg) => {
+    const t = document.createElement('div'); t.className = 'tile'; t.dataset.v = v;
+    if (bg) t.style.backgroundImage = bg; else t.textContent = label;
+    t.onclick = () => {
+      if (v === 'custom' && !state.set.has_bg) $('file').click(); else send({ cmd: 'set_bg_mode', mode: v });
+    };
+    tiles.append(t); return t;
+  };
+  mk('none', 'Без фона');
+  for (const g in GRAD) mk(g, '', GRAD[g]);
+  mk('custom', '🖼 Своё');
+  document.querySelectorAll('.seg').forEach((seg) => {
+    seg.querySelectorAll('button').forEach((b) => { b.onclick = () => setLook({ [seg.dataset.k]: b.dataset.v }); });
+  });
+}
+function setLook(patch) {
+  send({ cmd: 'set_look', ...patch });
+}
+function shrink(file) {
+  return new Promise((res, rej) => {
+    const img = new Image(), reader = new FileReader();
+    if (file.size > 32 * 1024 * 1024) return rej(new Error('too big'));
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = () => rej(new Error('read failed'));
+    img.onload = () => {
+      let max = 1920, q = 0.82;
+      for (let i = 0; i < 4; i++) {
+        const sc = Math.min(1, max / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * sc)); c.height = Math.max(1, Math.round(img.height * sc));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        const d = c.toDataURL('image/jpeg', q);
+        if (d.length < 1700000) { return res(d); }
+        max *= 0.7; q = Math.max(0.5, q - 0.1);
+      }
+      rej(new Error('too big'));
+    };
+    img.onerror = () => rej(new Error('bad image'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// ---------- история ----------
+function dayLabel(ts) {
+  const d = new Date(ts * 1000), n = new Date();
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  const y = new Date(n); y.setDate(n.getDate() - 1);
+  if (same(d, n)) return 'Сегодня';
+  if (same(d, y)) return 'Вчера';
+  return d.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function renderHist() {
+  const box = $('hlist'), q = $('hq').value.trim().toLowerCase();
+  box.textContent = '';
+  const rows = hist.filter((e) => !q || (e.t || '').toLowerCase().includes(q) || e.u.toLowerCase().includes(q)).slice(0, 500);
+  if (!rows.length) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = q ? 'Ничего не найдено' : 'История пока пуста'; box.append(d); return; }
+  let last = '';
+  for (const e of rows) {
+    const lb = dayLabel(e.ts);
+    if (lb !== last) { last = lb; const h = document.createElement('div'); h.className = 'day'; h.textContent = lb; box.append(h); }
+    const r = document.createElement('div'); r.className = 'hrow';
+    const tm = document.createElement('span'); tm.className = 'tm';
+    tm.textContent = new Date(e.ts * 1000).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    const tt = document.createElement('div'); tt.className = 'tt';
+    const b = document.createElement('b'); b.textContent = e.t || e.u;
+    const i = document.createElement('i'); i.textContent = e.u;
+    tt.append(b, i);
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'Удалить из истории';
+    x.onclick = (ev) => { ev.stopPropagation(); send({ cmd: 'delete_history', ts: e.ts, u: e.u }); };
+    r.onclick = () => send({ cmd: 'open_url', url: e.u });
+    r.append(tm, tt, x); box.append(r);
+  }
+}
+window.onHistory = (list) => { hist = list; renderHist(); };
+
+// ---------- состояние ----------
+function updateVpnServerLabel() {
+  const name = state.vpn?.servers?.[vpnServerIndex] || 'Выбрать сервер';
+  $('vpn-server-name').textContent = name;
+  $('vpn-server').title = name;
+}
+
+function renderVpnServerOptions() {
+  const query = $('vpn-server-search').value.trim().toLocaleLowerCase();
+  const options = $('vpn-server-options');
+  options.replaceChildren();
+  for (const [index, name] of (state.vpn?.servers || []).entries()) {
+    if (!name.toLocaleLowerCase().includes(query)) continue;
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'vpn-option';
+    option.tabIndex = -1;
+    option.setAttribute('aria-pressed', String(index === vpnServerIndex));
+    const label = document.createElement('span');
+    label.className = 'vpn-option-name';
+    label.textContent = name;
+    option.append(label);
+    if (index === state.vpn.current) {
+      const current = document.createElement('span');
+      current.className = 'vpn-option-current';
+      current.textContent = 'Текущий';
+      option.append(current);
+    }
+    option.onclick = () => {
+      vpnServerIndex = index;
+      updateVpnServerLabel();
+      setVpnServerPicker(false);
+      $('vpn-server').focus();
+    };
+    options.append(option);
+  }
+  options.scrollTop = 0;
+  $('vpn-server-empty').hidden = options.childElementCount !== 0;
+}
+
+function setVpnServerPicker(open) {
+  const picker = $('vpn-server-picker');
+  picker.hidden = !open;
+  $('vpn-server').setAttribute('aria-expanded', String(open));
+  if (open) {
+    const search = $('vpn-server-search');
+    search.value = '';
+    renderVpnServerOptions();
+    picker.scrollIntoView({block:'nearest'});
+    search.focus({preventScroll:true});
+  }
+}
+
+window.onState = (s) => {
+  const favoritesAvailable = (s.platform || 'windows') === 'windows' && !s.incognito;
+  $('favoritesbtn').hidden = !favoritesAvailable;
+  if (favoritesAvailable && $('star').getAttribute('data-hint') !== 'Добавить в избранное (Ctrl+D)') {
+    $('star').setAttribute('data-hint', 'Добавить в избранное (Ctrl+D)');
+    $('star').setAttribute('aria-label', 'Добавить в избранное (Ctrl+D)');
+  }
+  document.documentElement.dataset.platform = s.platform || 'windows';
+  $('updategrp').hidden = s.platform === 'linux' || !!s.incognito;
+  $('defaultbrowser').textContent = s.platform === 'linux' ? 'Сделать Lumen браузером по умолчанию…' : 'Выбрать Lumen в Windows…';
+  $('defaultbrowser').nextElementSibling.textContent = s.platform === 'linux' ? 'Изменить обработчик ссылок HTTP и HTTPS для текущего пользователя через XDG. Права администратора не нужны.' : 'Открыть системные настройки для ссылок HTTP и HTTPS. Выбор подтверждается в Windows.';
+  const previous = state;
+  state = s;
+  $('back').classList.toggle('history-empty', !s.navigation?.back);
+  $('fwd').classList.toggle('history-empty', !s.navigation?.forward);
+  document.body.classList.toggle('maximized',s.maximized);
+  if (s.version && previous.version !== s.version) {
+    $('logo').title = 'Lumen ' + s.version;
+    $('installedversion').textContent = 'Установлена версия ' + s.version;
+  }
+  syncFrameTheme();
+  const root = document.documentElement;
+  if (previous.set.theme !== s.set.theme) root.dataset.theme = s.set.theme || 'system';
+  if (s.look && JSON.stringify(previous.look) !== JSON.stringify(s.look)) {
+    root.style.setProperty('--acc-l', s.look.al); root.style.setProperty('--acc-d', s.look.ad);
+    root.style.setProperty('--font', s.look.font); root.style.setProperty('--fs', s.look.fs + 'px');
+  }
+  document.body.classList.toggle('inc', !!s.incognito);
+
+  const box = $('tablist');
+  const ids = new Set(s.tabs.map((t) => t.id));
+  if (activeTabDrag && (activeTabDrag.ids.length !== ids.size || activeTabDrag.ids.some(id => !ids.has(id)))) activeTabDrag();
+  for (const [id, el] of els) {
+    if (ids.has(id)) continue;
+    els.delete(id);
+    if (pendingDetaches.has(id)) {
+      clearTimeout(pendingDetaches.get(id));
+      pendingDetaches.delete(id);
+      el.remove();
+    } else {
+      el.classList.add('out');
+      setTimeout(() => el.remove(), 170);
+    }
+  }
+  const oldTabs = new Map(previous.tabs.map(t => [t.id, t]));
+  for (const t of s.tabs) {
+    let el = els.get(t.id);
+    const old = oldTabs.get(t.id);
+    if (!el) {
+      el = makeTab(t);
+      els.set(t.id, el);
+      box.append(el);
+    } else if (old && old.title === t.title && old.url === t.url && old.icon === t.icon &&
+        old.loading === t.loading && old.sleeping === t.sleeping &&
+        (previous.active === t.id) === (s.active === t.id)) {
+      continue;
+    }
+    el.classList.toggle('on', t.id === s.active);
+    el.classList.toggle('sleep', !!t.sleeping);
+    el.classList.toggle('loading', !!t.loading);
+    const site = t.url ? '1' : '';
+    if (el.dataset.site !== site) el.dataset.site = site;
+    const data = tabIcons.get(t.icon), {img, home, globe, label} = tabParts.get(el);
+    if(data){if(img.getAttribute('src')!==data)img.src=data;}else if(img.hasAttribute('src'))img.removeAttribute('src');
+    if (img.hidden !== !data) img.hidden = !data;
+    const hideHome = !!data || !!t.url;
+    if (home.hidden !== hideHome) home.hidden = hideHome;
+    globe.toggleAttribute('hidden', !!data || !t.url);
+    const text = t.title || 'Новая вкладка';
+    if (label.textContent !== text) label.textContent = text;
+  }
+  const usedIcons=new Set(s.tabs.map(t=>t.icon).filter(Boolean));
+  for(const key of tabIcons.keys())if(!usedIcons.has(key))tabIcons.delete(key);
+
+  const wanted = s.tabs.map(t => els.get(t.id));
+  const wantedSet = new Set(wanted);
+  const actual = [...box.children].filter(el => wantedSet.has(el));
+  if (pendingTabOrder) {
+    const received = s.tabs.map(t=>t.id);
+    if (received.join(',')===pendingTabOrder.ids.join(',') || performance.now()>pendingTabOrder.until ||
+        received.length!==pendingTabOrder.ids.length || received.some(id=>!pendingTabOrder.ids.includes(id))) pendingTabOrder=null;
+  }
+  if (!activeTabDrag && !pendingTabOrder && wanted.some((el, i) => actual[i] !== el)) settleTabs(wanted);
+  if (!activeTabDrag && previous.active !== s.active) {
+    els.get(s.active)?.scrollIntoView({block:'nearest', inline:'nearest'});
+  }
+  const cur = s.tabs.find((t) => t.id === s.active);
+  document.body.classList.toggle('loading', !!(cur && cur.loading));
+  const address = $('url'), url = cur ? cur.url : '';
+  if (document.activeElement !== address && address.value !== url) address.value = url;
+  $('engine').value = s.engine; $('engine2').value = s.engine;
+  $('shield').classList.toggle('on', s.adblock);
+  $('adb').textContent = 'Блокировка рекламы: ' + (s.adblock ? 'включена' : 'выключена');
+
+  // панели
+  $('panel').hidden = !s.panel || s.panel === 'dev';
+  $('panel').classList.toggle('favorites-popup', s.panel === 'favorites');
+  $('devbtn').hidden = !!s.incognito;
+  $('devbtn').classList.toggle('on', !!s.dev_open);
+  for (const n of ['history', 'settings', 'ext', 'downloads', 'favorites']) $('p-' + n).hidden = s.panel !== n;
+  $('favoritesbtn').classList.toggle('on', s.panel === 'favorites');
+  if (previous.panel === 'favorites' && s.panel !== 'favorites') $('favoriteslist').replaceChildren();
+  const zoomLabel = (s.zoom || 100) + '%';
+  const zoomReset = $('zreset');
+  if (zoomReset.textContent !== zoomLabel) zoomReset.textContent = zoomLabel;
+  const zoomDescription = 'Масштаб ' + zoomLabel + '. Сбросить (Ctrl+0)';
+  if (zoomReset.getAttribute('aria-label') !== zoomDescription) zoomReset.setAttribute('aria-label', zoomDescription);
+  $('hist').classList.toggle('on', s.panel === 'history');
+  $('downloadsbtn').classList.toggle('on', s.panel === 'downloads');
+  $('dlbadge').hidden = !(s.download_count > 0);
+  $('dlbadge').textContent = s.download_count > 99 ? '99+' : String(s.download_count || '');
+  $('gear').classList.toggle('on', s.panel === 'settings');
+  $('extbtn').classList.toggle('on', s.panel === 'ext');
+  if (s.platform !== 'linux' && s.panel && s.panel !== lastPanel) { $('panel').style.animation = 'none'; $('panel').offsetHeight; $('panel').style.animation = ''; }
+  lastPanel = s.panel;
+  if (s.panel !== 'settings' && !$('vpn-server-picker').hidden) setVpnServerPicker(false);
+  const settingsState = JSON.stringify([s.set,s.filters,s.look,s.block,s.maximized,s.adblock,s.vpn]);
+  if (settingsState === lastSettingsState) return;
+  lastSettingsState = settingsState;
+  const vpn = s.vpn;
+  const vpnAvailable = !!vpn?.available;
+  const privacyTitle = vpnAvailable ? 'Поиск и VPN' : 'Поиск';
+  $('settings-link-privacy').textContent = privacyTitle;
+  $('settings-title-privacy').textContent = privacyTitle;
+  $('vpn-settings').hidden = !vpnAvailable;
+  if (vpn?.available) {
+    const servers = vpn.servers || [];
+    const readOnly = !!vpn.read_only;
+    const currentServer = vpn.enabled && Number.isInteger(vpn.current) ? servers[vpn.current] : null;
+    $('vpn-current-server').hidden = !readOnly || !currentServer;
+    $('vpn-current-server').textContent = currentServer ? 'Сервер: ' + currentServer : '';
+    $('vpn-read-only').hidden = !readOnly;
+    $('vpn-import').hidden = readOnly;
+    const stateLabel = $('vpn-state');
+    stateLabel.dataset.state = vpn.error ? 'error' : vpn.enabled ? 'on' : 'off';
+    stateLabel.textContent = vpn.error ? 'Ошибка' : vpn.checking ? 'Проверка…' : vpn.enabled ? 'Включён' : 'Выключен';
+    $('vpn-session-actions').hidden = readOnly || !vpn.enabled;
+    const busy = !!vpn.importing || !!vpn.searching;
+    $('vpn-key').disabled = $('vpn-connect').disabled = busy;
+    $('vpn-disconnect').hidden = !vpn.enabled;
+    $('vpn-check').hidden = !vpn.enabled || !!vpn.error;
+    $('vpn-check').disabled = !!vpn.checking;
+    $('vpn-servers').hidden = readOnly || !servers.length;
+    $('vpn-server').disabled = $('vpn-use-server').disabled = $('vpn-find-server').disabled = busy;
+    $('vpn-search-status').textContent = vpn.searching ? 'Проверка серверов подписки…' : vpn.search_status || '';
+    if (readOnly || !servers.length || busy) setVpnServerPicker(false);
+    $('vpn-use-server').textContent = vpn.enabled ? 'Сменить сервер' : 'Подключить';
+    $('vpn-import-title').textContent = servers.length ? 'Добавить другую подписку или ключ' : 'Добавить подписку или ключ';
+    if (previous.vpn?.importing && !vpn.importing && !vpn.import_error) {
+      $('vpn-key').value = '';
+      $('vpn-connect').textContent = 'Импортировать';
+    }
+    if (!servers.length) $('vpn-import').open = true;
+    else if (!previous.vpn?.servers?.length || (previous.vpn?.importing && !vpn.importing && !vpn.import_error)) {
+      $('vpn-import').open = false;
+    }
+    if (JSON.stringify(servers) !== JSON.stringify(previous.vpn?.servers || []) || vpn.current !== previous.vpn?.current) {
+      vpnServerIndex = Number.isInteger(vpn.current) && vpn.current >= 0 && vpn.current < servers.length
+        ? vpn.current : servers.length ? 0 : -1;
+      updateVpnServerLabel();
+      if (!$('vpn-server-picker').hidden) renderVpnServerOptions();
+    }
+    if (vpn.recommended !== previous.vpn?.recommended && Number.isInteger(vpn.recommended)
+        && vpn.recommended >= 0 && vpn.recommended < servers.length) {
+      vpnServerIndex = vpn.recommended;
+      updateVpnServerLabel();
+    }
+    $('vpn-status').textContent = vpn.error || (vpn.enabled
+      ? vpn.checking ? 'Проверка HTTPS через выбранный сервер…' : vpn.check_status || 'Проверка соединения ещё не выполнена.'
+      : '');
+    $('vpn-import-status').textContent = vpn.importing ? 'Загрузка подписки…' : vpn.import_error || '';
+  }
+
+  // блокировка рекламы
+  document.querySelectorAll('.segx[data-x="level"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.filters.level));
+  $('fstat').textContent = s.platform === 'linux' ? s.filters.status : s.filters.level === 'strong' ? s.filters.status : 'Базовый режим: встроенный список доменов, без загрузки фильтров.';
+  $('updf').hidden = s.filters.level !== 'strong';
+  document.querySelectorAll('.segx[data-x="startup"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set.startup));
+  document.querySelectorAll('.segx[data-x="sleep"] button').forEach((b) => b.classList.toggle('on', +b.dataset.v === s.set.sleep));
+  document.querySelectorAll('.segx[data-x="engine-memory"] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set.engine_memory));
+  $('wmax').innerHTML = s.maximized
+    ? '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y="2.5" width="7" height="7" fill="none" stroke="currentColor"/><path d="M2.5 2.5v-2h7v7h-2" fill="none" stroke="currentColor"/></svg>'
+    : '<svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg>';
+  $('wmax').title = s.maximized ? 'Восстановить' : 'Развернуть';
+  document.querySelectorAll('.segx[data-x="labels"] button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'on') === !!s.set.labels));
+  $('bstat').textContent = 'Заблокировано запросов с запуска: ' + s.block.count;
+  if (s.panel === 'settings') $('blog').textContent = s.block.recent.length ? s.block.recent.join('\n') : 'Пока ничего (откройте сайт и вернитесь)';
+  $('shield').title = (s.adblock ? 'Блокировка рекламы: включена' : 'Блокировка рекламы: выключена') + (s.platform === 'linux' ? '' : ' • заблокировано: ' + s.block.count);
+
+  // элементы настроек
+  document.querySelectorAll('.seg').forEach((seg) => {
+    seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set[seg.dataset.k]));
+  });
+  $('sw').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.set.accent));
+  $('font').value = s.set.font;
+  $('tiles').querySelectorAll('.tile').forEach((t) => {
+    t.classList.toggle('on', t.dataset.v === s.set.bg_mode);
+    if (t.dataset.v === 'custom') {
+      t.style.backgroundImage = s.set.has_bg && thumb ? `url(${thumb})` : '';
+      t.textContent = s.set.has_bg && thumb ? '' : (s.set.has_bg ? '🖼 Своё фото' : '＋ Своё фото');
+    }
+  });
+  $('unpick').hidden = !s.set.has_bg;
+};
+
+// Downloads use native operations; this view never starts or executes files itself.
+let downloadRows = [], downloadQuery = '';
+const downloadNodes = new Map();
+const downloadBytes = n => { if(!Number.isFinite(n)||n<0)return '';const units=['Б','КиБ','МиБ','ГиБ'];let i=0;while(n>=1024&&i<3){n/=1024;i++}return (i?n.toFixed(1):Math.round(n))+' '+units[i]; };
+function renderDownloads() {
+  const list=$('dllist'),query=downloadQuery.toLocaleLowerCase();
+  const rows=downloadRows.filter(r=>!query||(r.name+' '+r.path).toLocaleLowerCase().includes(query));
+  const ids=new Set(rows.map(r=>r.id));for(const [id,entry] of downloadNodes){if(!ids.has(id)){entry.el.remove();downloadNodes.delete(id)}}
+  $('dlempty').hidden=rows.length>0;$('dlempty').textContent=downloadRows.length?'Ничего не найдено.':'Пока нет загрузок. Файлы с сайтов появятся здесь.';
+  const names={running:'Загрузка',completed:'Готово',cancelled:'Отменено',failed:'Ошибка',interrupted:'Прервано'};
+  for(const r of rows){
+    let entry=downloadNodes.get(r.id);
+    if(!entry){
+      const el=document.createElement('div');el.className='dl-row';el.dataset.downloadId=r.id;
+      const icon=document.createElement('div');icon.className='dl-symbol';icon.innerHTML='<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 3H5v18h14V8l-5-5Zm0 0v5h5M8 13h8m-8 4h5"/></svg>';
+      const body=document.createElement('div'),name=document.createElement('div'),path=document.createElement('div'),bar=document.createElement('progress'),meta=document.createElement('div'),actions=document.createElement('div');
+      name.className='dl-name';path.className='dl-path';bar.className='dl-progress';meta.className='dl-meta';actions.className='dl-actions';bar.max=100;bar.setAttribute('aria-label','Прогресс загрузки');
+      const buttons={};for(const [action,label] of [['open','Открыть'],['folder','Папка'],['cancel','Отменить'],['remove','Удалить из списка']]){const b=document.createElement('button');b.className='chip';b.textContent=label;b.onclick=()=>send({cmd:'download_action',id:r.id,action});buttons[action]=b;actions.append(b)}
+      body.append(name,path,bar,meta);el.append(icon,body,actions);entry={el,name,path,bar,meta,buttons,key:''};downloadNodes.set(r.id,entry);list.append(el);
+    }
+    const key=JSON.stringify(r);if(entry.key!==key){entry.key=key;entry.name.textContent=r.name;entry.path.textContent=r.path;
+      const progress=r.total>0?Math.min(100,Math.floor(r.received/r.total*100)):null;
+      entry.bar.hidden=r.status!=='running';if(progress===null)entry.bar.removeAttribute('value');else entry.bar.value=progress;
+      entry.meta.textContent=(r.status==='running'&&r.total>0&&r.received>=r.total?'Ожидание сохранения файла':names[r.status]||r.status)+' · '+downloadBytes(r.received)+(r.total?' / '+downloadBytes(r.total):'')+(progress!==null&&r.status==='running'?' · '+progress+'%':'')+(r.error?' · '+r.error:'');entry.meta.classList.toggle('dl-error',r.status==='failed');
+      entry.buttons.open.hidden=r.status!=='completed';entry.buttons.cancel.hidden=r.status!=='running';entry.buttons.remove.hidden=r.status==='running';
+    }
+  }
+  // Keep existing nodes stable when progress changes; order only new/reordered entries.
+  const wanted=rows.map(r=>downloadNodes.get(r.id).el);if(wanted.some((el,i)=>list.children[i]!==el))wanted.forEach(el=>list.append(el));
+}
+window.onDownloads=rows=>{downloadRows=Array.isArray(rows)?rows:[];renderDownloads();};
+$('dlq').oninput=e=>{downloadQuery=e.target.value;renderDownloads();};
+$('dlclear').onclick=()=>send({cmd:'clear_downloads'});
+$('dlopenfolder').onclick=()=>send({cmd:'downloads_folder'});
+// ---------- уведомление ----------
+let toastTimer = 0;
+window.onToast = (m, duration = 2600) => {
+  const t = $('toast'); t.textContent = m; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), duration);
+};
+
+// ---------- расширения ----------
+window.onExt = (list) => {
+  const box = $('extlist'); box.textContent = '';
+  if (!list.length) { const d = document.createElement('div'); d.className = 'empty'; d.style.padding = '18px 0'; d.textContent = 'Расширений пока нет'; box.append(d); return; }
+  for (const e of list) {
+    const r = document.createElement('div'); r.className = 'erow';
+    const b = document.createElement('b'); b.textContent = e.name || e.id;
+    const op = document.createElement('button'); op.className = 'chip'; op.textContent = 'Открыть'; op.hidden = !e.openable;
+    op.onclick = () => send({ cmd: 'ext_open', id: e.id });
+    const t = document.createElement('button'); t.className = 'chip'; t.textContent = e.on ? 'Включено' : 'Выключено';
+    t.onclick = () => send({ cmd: 'ext_toggle', id: e.id, on: !e.on });
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.title = 'Удалить расширение';
+    x.onclick = () => { if (confirm('Удалить расширение «' + (e.name || e.id) + '»?')) send({ cmd: 'ext_remove', id: e.id }); };
+    r.append(b, op, t, x); box.append(r);
+  }
+};
+window.onExtMsg = (m) => { $('extmsg').textContent = m; };
+
+// ---------- распознавание музыки ----------
+
+
+// ---------- обработчики ----------
+buildStatic();
+document.querySelector('.settings-nav').addEventListener('click', event => {
+  const anchor = event.target.closest('a');
+  if (!anchor) return;
+  const section = $(anchor.hash.slice(1));
+  if (!section) return;
+  event.preventDefault();
+  section.focus({preventScroll:true});
+  const reduced = state.platform === 'linux' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const panel = $('panel');
+  const top = panel.scrollTop + section.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+  panel.scrollTo({top:top - $('settings-rail').offsetHeight - 10, behavior:reduced ? 'auto' : 'smooth'});
+});
+$('plus').onclick = () => send({ cmd: 'new_tab' });
+$('back').onclick = () => send({ cmd: 'back' });
+$('fwd').onclick = () => send({ cmd: 'forward' });
+$('rel').onclick = () => send({ cmd: 'reload' });
+$('inc').onclick = () => send({ cmd: 'incognito' });
+$('shield').onclick = () => send({ cmd: 'toggle_adblock' });
+$('adb').onclick = () => send({ cmd: 'toggle_adblock' });
+const togglePanel = (name) => send(state.panel === name ? { cmd: 'close_panel' } : { cmd: 'open_panel', name });
+$('favoritesbtn').onclick = () => togglePanel('favorites');
+window.onFavorites = (rows) => {
+  const box = $('favoriteslist');
+  const scrollTop = box.scrollTop;
+  box.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.textContent = 'Нажмите звезду рядом с адресом, чтобы сохранить страницу.';
+    box.append(empty);
+    return;
+  }
+  for (const {t, u, icon} of rows) {
+    const row = document.createElement('div');
+    row.className = 'hrow';
+    const open = document.createElement('button');
+    open.className = 'tt favorite-link';
+    const host = new URL(u).hostname.replace(/^www\./, '');
+    let hue = 0;
+    for (const letter of host) hue = (hue * 31 + letter.charCodeAt(0)) % 360;
+    const mark = document.createElement('span');
+    mark.className = 'favorite-icon';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.style.background = `linear-gradient(135deg,hsl(${hue},62%,52%),hsl(${(hue + 40) % 360},62%,42%))`;
+    mark.textContent = (t || host || '?').trim().charAt(0).toUpperCase();
+    if (typeof icon === 'string') {
+      const image = document.createElement('img');
+      image.alt = '';
+      image.decoding = 'async';
+      image.loading = 'lazy';
+      image.onerror = () => image.remove();
+      image.src = icon;
+      mark.append(image);
+    }
+    const label = document.createElement('span');
+    label.className = 'favorite-label';
+    const title = document.createElement('b');
+    title.textContent = t || u;
+    const address = document.createElement('i');
+    address.textContent = u;
+    label.append(title, address);
+    open.append(mark, label);
+    open.onclick = () => send({ cmd: 'open_favorite', url: u });
+    open.onmousedown = event => { if (event.button === 1) event.preventDefault(); };
+    open.onauxclick = event => {
+      if (event.button !== 1 || !event.isTrusted) return;
+      event.preventDefault();
+      send({ cmd: 'open_favorite', url: u, background: true });
+    };
+    const remove = document.createElement('button');
+    remove.className = 'x favorite-remove';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', 'Удалить из избранного');
+    remove.onclick = () => send({ cmd: 'remove_favorite', url: u });
+    row.append(open, remove);
+    box.append(row);
+  }
+  box.scrollTop = scrollTop;
+};
+$('hist').onclick = () => togglePanel('history');
+$('downloadsbtn').onclick = () => togglePanel('downloads');
+$('extbtn').onclick = () => togglePanel('ext');
+document.querySelectorAll('.segx[data-x="level"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_adblock_level', level: b.dataset.v }));
+$('applyupdate').onclick = () => send({cmd:'apply_update'});
+window.onUpdateStatus = (message, ready, canCheck) => {
+  $('updatestatus').textContent = message;
+  if (typeof ready === 'boolean') $('applyupdate').hidden = !ready;
+  if (typeof canCheck === 'boolean') $('checkupdate').hidden = !canCheck;
+};
+$('developerprofile').onclick = () => send({cmd:'go',text:'https://github.com/L4NOTTE'});
+$('developerrepo').onclick = () => send({cmd:'go',text:'https://github.com/L4NOTTE/Lumen'});
+const supportLinks = [];
+for (const {label, url} of supportLinks) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'chip';
+  button.textContent = label + ' ↗';
+  button.onclick = () => send({cmd:'go',text:url});
+  $('supportlinks').append(button);
+}
+$('supportlinks').hidden = !$('supportlinks').childElementCount;
+if (!$('supportlinks').hidden) document.querySelector('.support-copy span').hidden = true;
+$('checkupdate').onclick = () => send({cmd:'check_update'});
+$('updf').onclick = () => send({ cmd: 'update_filters' });
+$('star').onclick = () => send({ cmd: 'add_current_link' });
+$('wmin').onclick = () => send({ cmd: 'win_min' });
+$('wmax').onclick = () => send({ cmd: 'win_max' });
+$('wclose').onclick = () => send({ cmd: 'win_close' });
+const tabList = $('tablist');
+tabList.addEventListener('wheel', event => {
+  if (activeTabDrag || event.ctrlKey || event.deltaX || tabList.scrollWidth <= tabList.clientWidth) return;
+  event.preventDefault();
+  tabList.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? tabList.clientWidth : 1);
+}, {passive:false});
+const dragZone = (t) => t.id === 'tabs' || t.id === 'tablist' || t.id === 'logo' || t.classList.contains('grow') || t.id === 'badge';
+$('tabs').addEventListener('mousedown', (e) => { if (e.button === 0 && dragZone(e.target) && e.detail === 1) send({ cmd: 'win_drag' }); });
+$('tabs').addEventListener('dblclick', (e) => { if (dragZone(e.target)) send({ cmd: 'win_max' }); });
+document.querySelectorAll('.segx[data-x="sleep"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_sleep', minutes: +b.dataset.v }));
+document.querySelectorAll('.segx[data-x="engine-memory"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_engine_memory', profile: b.dataset.v }));
+$('vpn-connect').onclick = () => {
+  const input = $('vpn-key');
+  const link = input.value.trim();
+  if (!link) {
+    input.focus();
+    return;
+  }
+  const limit = state.vpn?.max_link_bytes;
+  if (limit && new TextEncoder().encode(link).length > limit) {
+    $('vpn-import-status').textContent = 'Ссылка превышает 32 КБ. Запросите короткую ссылку у провайдера.';
+    input.focus();
+    return;
+  }
+  send({cmd: 'vpn_connect', link});
+};
+$('vpn-key').oninput = () => {
+  $('vpn-connect').textContent = /^vless:\/\//i.test($('vpn-key').value.trim())
+    ? 'Подключить по ключу' : 'Импортировать';
+};
+$('vpn-use-server').onclick = () => {
+  if (vpnServerIndex >= 0) send({cmd: 'vpn_choose_server', index: vpnServerIndex});
+};
+$('vpn-server').onclick = () => setVpnServerPicker($('vpn-server-picker').hidden);
+$('vpn-find-server').onclick = () => send({cmd: 'vpn_find_server'});
+$('vpn-server').onkeydown = event => {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    if ($('vpn-server-picker').hidden) setVpnServerPicker(true);
+    const options = $('vpn-server-options');
+    (event.key === 'ArrowDown' ? options.firstElementChild : options.lastElementChild)?.focus();
+  }
+};
+$('vpn-server-search').oninput = renderVpnServerOptions;
+$('vpn-server-picker').onkeydown = event => {
+  const options = [...$('vpn-server-options').children];
+  const index = options.indexOf(document.activeElement);
+  const search = $('vpn-server-search');
+  if (event.target === search && event.key === 'Enter') {
+    event.preventDefault();
+    options[0]?.click();
+  } else if (options.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+    event.preventDefault();
+    if (event.key === 'ArrowUp' && index === 0) search.focus();
+    else options[event.key === 'ArrowDown' ? Math.min(index + 1, options.length - 1) : index < 0 ? options.length - 1 : index - 1].focus();
+  }
+};
+document.addEventListener('click', event => {
+  if (!$('vpn-server-picker').hidden && !event.target.closest('#vpn-server-picker, #vpn-server')) setVpnServerPicker(false);
+});
+$('vpn-key').onkeydown = event => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    $('vpn-connect').click();
+  }
+};
+$('vpn-disconnect').onclick = () => send({cmd: 'vpn_disconnect'});
+$('vpn-check').onclick = () => send({cmd: 'vpn_check'});
+document.querySelectorAll('.segx[data-x="startup"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_startup', mode: b.dataset.v }));
+const accentHex = $('accenthex');
+const commitAccent = () => {
+  const hex = accentHex.value.trim();
+  const valid = /^#[0-9a-f]{6}$/i.test(hex);
+  accentHex.setCustomValidity(valid ? '' : 'Введите цвет в формате #4F46E5');
+  if (accentHex.reportValidity()) setLook({accent:hex.toLowerCase()});
+};
+accentHex.oninput = () => accentHex.setCustomValidity('');
+accentHex.onchange = commitAccent;
+accentHex.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); commitAccent(); } };
+$('customaccent').onchange = e => { accentHex.value = e.target.value; accentHex.setCustomValidity(''); commitAccent(); };
+$('accentreset').onclick = () => { accentHex.setCustomValidity(''); setLook({accent:'indigo'}); };
+$('defaultbrowser').onclick = () => {
+  if(state.platform!=='linux'||confirm('Сделать Lumen браузером по умолчанию для HTTP и HTTPS в этой учётной записи?'))send({cmd:'default_browser'});
+};
+document.querySelectorAll('.segx[data-x="labels"] button').forEach((b) => b.onclick = () => send({ cmd: 'set_labels', on: b.dataset.v === 'on' }));
+$('extgo').onclick = () => { const v = $('extin').value.trim(); if (v) send({ cmd: 'ext_install', input: v }); };
+$('extin').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('extgo').click(); });
+$('extdir').onclick = () => send({ cmd: 'ext_open_dir' });
+$('gear').onclick = () => togglePanel('settings');
+document.querySelectorAll('.pclose').forEach((b) => b.onclick = () => send({ cmd: 'close_panel' }));
+$('engine').onchange = (e) => send({ cmd: 'set_engine', engine: e.target.value });
+$('engine2').onchange = (e) => send({ cmd: 'set_engine', engine: e.target.value });
+$('font').onchange = (e) => setLook({ font: e.target.value });
+$('hq').oninput = renderHist;
+$('hclear').onclick = () => { if (confirm('Удалить всю историю?')) send({ cmd: 'clear_history' }); };
+$('pick').onclick = () => $('file').click();
+$('unpick').onclick = () => { thumb = null; send({ cmd: 'clear_background' }); };
+$('file').onchange = async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  try { const d = await shrink(f); thumb = d; lastSettingsState = ''; window.onState(state); send({ cmd: 'set_background', data: d }); }
+  catch (_) { alert('Не удалось загрузить это изображение'); }
+};
+$('url').addEventListener('focus', (e) => e.target.select());
+$('url').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.value.trim()) { send({ cmd: 'go', text: e.target.value }); e.target.blur(); }
+});
+addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && k === 'i')) { e.preventDefault(); send({cmd:'dev_tools'}); return; }
+  if (e.key === 'F11') { e.preventDefault(); send({cmd:'fullscreen'}); return; }
+  if (e.ctrlKey && ['+', '=', '-', '0'].includes(e.key)) { e.preventDefault(); send({cmd: e.key === '-' ? 'zoom_out' : e.key === '0' ? 'zoom_reset' : 'zoom_in'}); return; }
+  if (e.key === 'Escape' && !$('vpn-server-picker').hidden) {
+    e.preventDefault();
+    setVpnServerPicker(false);
+    $('vpn-server').focus();
+  }
+  else if (e.key === 'Escape' && state.panel) { send({ cmd: state.panel === 'dev' ? 'dev_close' : 'close_panel' }); }
+  else if (e.ctrlKey && e.shiftKey && k === 'n') { e.preventDefault(); send({ cmd: 'incognito' }); }
+  else if (e.ctrlKey && k === 't') { e.preventDefault(); send({ cmd: 'new_tab' }); }
+  else if (e.ctrlKey && k === 'w') { e.preventDefault(); send({ cmd: 'close_tab', id: state.active }); }
+  else if (e.ctrlKey && k === 'l') { e.preventDefault(); $('url').focus(); }
+  else if (e.ctrlKey && k === 'j') { e.preventDefault(); togglePanel('downloads'); }
+  else if (e.ctrlKey && k === 'h') { e.preventDefault(); togglePanel('history'); }
+  else if (e.ctrlKey && k === 'd') { e.preventDefault(); send({ cmd: 'add_current_link' }); }
+  else if (e.ctrlKey && e.key === ',') { e.preventDefault(); togglePanel('settings'); }
+  else if (e.key === 'F5') { e.preventDefault(); send({ cmd: 'reload' }); }
+});
+$('zin').onclick = () => send({cmd:'zoom_in'});
+$('zout').onclick = () => send({cmd:'zoom_out'});
+$('zreset').onclick = () => send({cmd:'zoom_reset'});
+$('devbtn').onclick = () => send({cmd:'open_panel',name:'dev'});
+document.querySelectorAll('[data-resize]').forEach(el=>el.onpointerdown=e=>{if(e.button===0)send({cmd:'win_resize',edge:el.dataset.resize});});
+send({ cmd: 'ready' });
+</script>
+</body>
+</html>

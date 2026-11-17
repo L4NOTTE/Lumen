@@ -6,10 +6,12 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 prefix="${LUMEN_INSTALL_PREFIX:-$HOME/.local}"
 data="${XDG_DATA_HOME:-$HOME/.local/share}"
 check_only=false
+cargo_options=()
 case "${1:-}" in
   --check) check_only=true ;;
+  --offline) cargo_options+=(--offline) ;;
   '') ;;
-  *) echo 'Usage: bash tools/install-linux.sh [--check]' >&2; exit 2 ;;
+  *) echo 'Usage: bash tools/install-linux.sh [--check|--offline]' >&2; exit 2 ;;
 esac
 [[ $# -le 1 ]] || { echo 'Too many arguments.' >&2; exit 2; }
 for folder in "$prefix" "$data"; do
@@ -24,11 +26,11 @@ pkg-config --exists gtk+-3.0 webkit2gtk-4.1 x11 xrandr xkbcommon wayland-client 
   echo 'Missing GTK/WebKitGTK development libraries. See LINUX.md; no files installed.' >&2; exit 1;
 }
 host="$(rustc -vV | sed -n 's/^host: //p')"
-[[ "$host" == x86_64-unknown-linux-gnu ]] || { echo "Supported target: Ubuntu/Mint x86_64 GNU, found $host" >&2; exit 1; }
+[[ "$host" == x86_64-unknown-linux-gnu ]] || { echo "Expected Linux x86_64 GNU, found $host" >&2; exit 1; }
 $check_only && { echo 'Linux build dependencies found.'; exit 0; }
 cd -- "$root"
 echo 'Building Lumen Linux preview (WebKitGTK; Chrome extensions are not yet supported).'
-cargo build --release --locked --target "$host"
+cargo build --release --locked --target "$host" "${cargo_options[@]}"
 binary="${CARGO_TARGET_DIR:-$root/target}/$host/release/lumen"
 [[ -x "$binary" ]] || { echo "Built binary missing: $binary" >&2; exit 1; }
 mkdir -p -- "$prefix/bin" "$data/applications" "$data/icons/hicolor/scalable/apps"

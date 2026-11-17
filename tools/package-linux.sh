@@ -3,7 +3,7 @@ set -euo pipefail
 [[ "$(uname -s)" == Linux ]] || { echo 'Run packaging on Linux.' >&2; exit 1; }
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd -- "$root"
-version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
+version="$(tr -d '\r' < Cargo.toml | sed -n 's/^version = "\([^"]*\)"/\1/p' | head -n 1)"
 arch="$(dpkg --print-architecture)"
 [[ "$arch" == amd64 ]] || { echo 'This package configuration targets amd64.' >&2; exit 1; }
 binary="$root/target/release/lumen"

@@ -1,0 +1,10 @@
+Xray-core is licensed under the Mozilla Public License 2.0.
+
+Corresponding upstream source:
+https://github.com/XTLS/Xray-core/tree/676eaf66f8f05d4d558ee7a74b4736623d3feeb9
+
+Apply the accompanying xray-dependencies.patch from the source root.
+Build with Go 1.27.4 for Windows amd64 and CGO_ENABLED=0:
+
+go mod verify
+go build -trimpath -buildvcs=false -ldflags "-s -w -buildid= -X github.com/xtls/xray-core/core.build=676eaf6" -o xray.exe ./main

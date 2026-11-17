@@ -95,6 +95,24 @@ try {
     $detachMs=$detachTimer.Elapsed.TotalMilliseconds
     $detached=[Windows.Automation.AutomationElement]::FromHandle($detachedHandle)
     $tab=Wait-Until {Elements $detached | Where-Object {$_.Current.Name -eq 'Lumen performance fixture' -and $_.Current.BoundingRectangle.Height -lt 65 -and $_.Current.BoundingRectangle.Y -lt ($detached.Current.BoundingRectangle.Y + 70)} | Select-Object -First 1}
+    $zoomButtons = @{
+        zin = 'Увеличить*'
+        zout = 'Уменьшить*'
+        zreset = 'Масштаб 100%.*'
+    }
+    $controls = @{}
+    foreach ($buttonId in $zoomButtons.Keys) {
+        $controls[$buttonId] = Wait-Until { Elements $detached | Where-Object {
+            $_.Current.AutomationId -eq $buttonId -or
+                ($_.Current.ControlType -eq [Windows.Automation.ControlType]::Button -and $_.Current.Name -like $zoomButtons[$buttonId])
+        } | Select-Object -First 1 }
+    }
+    foreach ($step in @(@{button='zin'; count=3; expected='130%'}, @{button='zout'; count=2; expected='110%'}, @{button='zreset'; count=1; expected='100%'})) {
+        $pattern = $controls[$step.button].GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)
+        for ($click=0; $click -lt $step.count; $click++) { $pattern.Invoke() }
+        [void](Wait-Until { $controls['zreset'].Current.Name -like "Масштаб $($step.expected).*" })
+    }
+    Write-Host 'Detached toolbar zoom: 100% -> 130% -> 110% -> 100%'
     $mainRect=$main.Current.BoundingRectangle
     $destination=(Elements $main | Where-Object {$_.Current.AutomationId -eq 'plus' -or $_.Current.Name -match 'Ctrl\+T'} | Select-Object -First 1).Current.BoundingRectangle
     Drag $tab ($destination.X-4) ($destination.Y+$destination.Height/2) $detached

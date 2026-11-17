@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Lumen
+Comment=Web browser written in Rust
+Comment[ru]=Браузер на Rust
+Exec=lumen --url %u
+Icon=lumen
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+StartupWMClass=lumen
